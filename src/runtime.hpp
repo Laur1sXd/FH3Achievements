@@ -15,4 +15,6 @@ bool runtimeControlEnabled();
 bool applyRuntimeLoad();
 int runtimeLoadState();
 void refreshRuntimeNotice(void* page);
+bool installRuntimePreview();
+void stopRuntimePreview();
 }
