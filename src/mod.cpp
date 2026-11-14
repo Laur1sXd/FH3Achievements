@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <ctime>
 #include <fstream>
 #include <sstream>
@@ -34,6 +35,28 @@ void onPopups(void*, const char*, int value) {
     popups = value != 0;
     enableImportNotice(popups);
     writeSetting(L"Popups", value != 0);
+}
+
+bool loadRequested(const fs::path& install) {
+    // The compatibility loader registers opt-in mods even when they start off,
+    // so their startup-only scene can be mounted before the first F9 enable.
+    const auto file = install / L"fh3-mods" / L"platform-disabled.txt";
+    if (!fs::exists(file)) return true;
+    std::ifstream in(file);
+    if (!in) throw std::runtime_error("cannot read the platform Load setting");
+    std::string line;
+    bool first = true;
+    while (std::getline(in, line)) {
+        if (first && line.starts_with("\xef\xbb\xbf")) line.erase(0, 3);
+        first = false;
+        const auto begin = line.find_first_not_of(" \t\r");
+        if (begin == std::string::npos || line[begin] == '#') continue;
+        line = line.substr(begin, line.find_last_not_of(" \t\r") - begin + 1);
+        std::ranges::transform(line, line.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (line == "fh3achievements.dll") return false;
+    }
+    if (!in.eof()) throw std::runtime_error("cannot finish reading the platform Load setting");
+    return true;
 }
 struct Record {
     uint64_t revision = 0;
@@ -270,7 +293,11 @@ void run(HINSTANCE instance) {
             return;
         }
         bool eventsEnabled = false;
-        const bool codeReady = !stopping && api->wait_for_code && api->wait_for_code(8000) == game;
+        bool codeReady = false;
+        for (int waited = 0; !stopping && api->wait_for_code && waited < 8000; waited += 250) {
+            if (api->wait_for_code(250) == game) { codeReady = true; break; }
+        }
+        if (stopping) return;
         if (codeReady) {
             eventsEnabled = installEventReader(api, mod, game);
             log(installImportNotice(api, mod, game) ? "First-run achievement HUD ready to wait for free roam." :
@@ -312,6 +339,10 @@ void run(HINSTANCE instance) {
             overlay.update(popups);
             Sleep(32);
         }
+        // Stop accepting events before the final drain so an F9 disable cannot
+        // lose live counters collected since the last two-second save scan.
+        if (eventsEnabled) stopEventReader(api, mod);
+        state.refresh(game, overlay, eventsEnabled);
         state.acknowledgeImportNotice();
     } catch (const std::exception& error) {
         log(std::string("Achievement worker stopped: ") + error.what());
@@ -358,6 +389,11 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* platform) {
         setting.on_change = onPopups;
         api->add_setting(mod, &setting);
 
+        if (!loadRequested(install)) {
+            log("Load Achievements is OFF; registered the scene and settings without starting tracking or hooks.");
+            return 0;
+        }
+
         HMODULE instance = nullptr;
         if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                                 reinterpret_cast<const wchar_t*>(&stopping), &instance)) return 1;
@@ -377,4 +413,13 @@ FH3MOD_EXPORT void fh3mod_shutdown() {
     stopJournal();
     stopImportNotice();
     if (api && mod) stopEventReader(api, mod);
+    if (api && mod) log("Achievements stopped; worker, tracking hooks and notification window are off.");
+}
+
+// Opt in to the separate Mod Platform compatibility build's Load/F9 workflow.
+FH3MOD_EXPORT int fh3mod_runtime_toggle() { return 1; }
+FH3MOD_EXPORT int fh3mod_can_shutdown() {
+    if (journalCanShutdown()) return 1;
+    log("Close the Achievements journal before applying its Load setting with F9.");
+    return 0;
 }
