@@ -162,11 +162,15 @@ bool installImportNotice(const FH3ModApi* api, FH3Mod* mod, const uint8_t* base)
         std::memcmp(base + ShowNotification, ShowBytes, sizeof ShowBytes) != 0) return false;
 
     auto* writable = const_cast<uint8_t*>(base);
-    hooks[0] = api->hook_function(mod, "Achievement HUD notification destructor", writable + ComponentDtor,
+    {
+        std::lock_guard lock(mutex);
+        components.clear();
+    }
+    if (!hooks[0]) hooks[0] = api->hook_function(mod, "Achievement HUD notification destructor", writable + ComponentDtor,
                                   reinterpret_cast<void*>(onDestruct), reinterpret_cast<void**>(&originalDtor));
-    hooks[1] = api->hook_function(mod, "Achievement HUD notification constructor", writable + ComponentCtor,
+    if (!hooks[1]) hooks[1] = api->hook_function(mod, "Achievement HUD notification constructor", writable + ComponentCtor,
                                   reinterpret_cast<void*>(onConstruct), reinterpret_cast<void**>(&originalCtor));
-    hooks[2] = api->hook_function(mod, "First-run achievement driving HUD update", writable + DrivingHudUpdate,
+    if (!hooks[2]) hooks[2] = api->hook_function(mod, "First-run achievement driving HUD update", writable + DrivingHudUpdate,
                                   reinterpret_cast<void*>(onUpdate), reinterpret_cast<void**>(&originalUpdate));
     for (auto* hook : hooks) {
         if (!hook || !api->enable_hooks(mod, hook)) {
@@ -182,6 +186,8 @@ void stopImportNotice() {
     if (!platform || !owner) return;
     for (auto it = hooks.rbegin(); it != hooks.rend(); ++it)
         if (*it) platform->disable_hooks(owner, *it);
+    std::lock_guard lock(mutex);
+    components.clear();
 }
 
 void enableImportNotice(bool value) { enabled = value; }
