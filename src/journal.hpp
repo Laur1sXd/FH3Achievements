@@ -11,6 +11,7 @@ inline constexpr char JournalFile[] = "UI/Scenes/Anthem/A_AchJournal.xaml";
 std::string journalXaml(const ProgressList& progress, const Unlocks& unlocks);
 
 bool installJournal(const FH3ModApi* api, FH3Mod* mod, const uint8_t* game);
+bool platformJournalRouteReady(const uint8_t* game);
 void publishJournal(const ProgressList& progress, const Unlocks& unlocks);
 void stopJournal();
 }
