@@ -21,6 +21,7 @@ FH3Hook* hook = nullptr;
 void* original = nullptr;
 std::mutex mutex;
 LiveProgress pending{};
+bool accepting = false;
 
 struct Rule { int id; int target; bool increment; };
 constexpr Rule Rules[] = {
@@ -43,6 +44,7 @@ std::optional<T> value(const Descriptor* fields, uint32_t size, uint32_t index) 
 
 void observe(int id, int64_t current, bool increment = false) {
     std::lock_guard lock(mutex);
+    if (!accepting) return;
     pending[id] = increment ? (std::min<int64_t>)(pending[id] + current, 1000)
                             : (std::max)(pending[id], current);
 }
@@ -92,10 +94,18 @@ bool installEventReader(const FH3ModApi* api, FH3Mod* mod, const uint8_t* base) 
     auto* slot = const_cast<uint8_t*>(base) + 0x2cf01a0;
     hook = api->hook_pointer(mod, "FH3 achievement events (EtxEventWrite)", reinterpret_cast<void**>(slot),
                              reinterpret_cast<void*>(eventWrite), &original);
-    return hook && original && api->enable_hooks(mod, hook);
+    const bool installed = hook && original && api->enable_hooks(mod, hook);
+    std::lock_guard lock(mutex);
+    accepting = installed;
+    return installed;
 }
 void stopEventReader(const FH3ModApi* api, FH3Mod* mod) {
+    {
+        std::lock_guard lock(mutex);
+        accepting = false;
+    }
     if (hook) api->disable_hooks(mod, hook);
+    hook = nullptr;
 }
 
 LiveProgress takeEvents() {
