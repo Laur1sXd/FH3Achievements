@@ -23,6 +23,8 @@ unsigned inheritedUpdates = 0, nativeHudUpdates = 0;
 std::string capturedPage;
 std::mutex hookMutex;
 std::set<FH3Hook*> activeHooks;
+std::map<FH3Hook*, void*> hookCallbacks;
+unsigned hookCreations = 0;
 std::atomic<bool> codeAvailable = true;
 void stockFocus(void*) {}
 void stockUpdate(void*) { ++nativeHudUpdates; }
@@ -52,32 +54,44 @@ void* waitForCode(uint32_t timeout) {
 }
 int addSetting(FH3Mod*, const FH3Setting*) { return 1; }
 uint32_t original(const void*, const void*, uint64_t, uint32_t, const void*) { return 42; }
+FH3Hook* remember(uintptr_t id, void* callback) {
+    std::lock_guard lock(hookMutex);
+    auto* hook = reinterpret_cast<FH3Hook*>(id);
+    hookCallbacks[hook] = callback;
+    ++hookCreations;
+    return hook;
+}
 FH3Hook* hookPointer(FH3Mod*, const char*, void** slot, void* callback, void** next) {
     auto* ptr = reinterpret_cast<uint8_t*>(slot);
-    if (ptr == image.data() + 0x4566590 + 148 * sizeof(void*)) { *next=reinterpret_cast<void*>(stockFocus);installedFocus=callback;return reinterpret_cast<FH3Hook*>(3); }
-    if (ptr == image.data() + 0x4566590 + 179 * sizeof(void*)) return reinterpret_cast<FH3Hook*>(4);
-    if (ptr == image.data() + 0x4566590 + 175 * sizeof(void*)) { *next=reinterpret_cast<void*>(stockUpdate);installedUpdate=callback;return reinterpret_cast<FH3Hook*>(10); }
+    if (ptr == image.data() + 0x4566590 + 148 * sizeof(void*)) { *next=reinterpret_cast<void*>(stockFocus);installedFocus=callback;return remember(3, callback); }
+    if (ptr == image.data() + 0x4566590 + 179 * sizeof(void*)) return remember(4, callback);
+    if (ptr == image.data() + 0x4566590 + 175 * sizeof(void*)) { *next=reinterpret_cast<void*>(stockUpdate);installedUpdate=callback;return remember(10, callback); }
     if (ptr != image.data() + 0x2cf01a0) return nullptr;
     *next = reinterpret_cast<void*>(original);
     installedDetour = callback;
-    return reinterpret_cast<FH3Hook*>(1);
+    return remember(1, callback);
 }
 int enable(FH3Mod*, FH3Hook* hook) {
     std::lock_guard lock(hookMutex);
     activeHooks.insert(hook);
+    if (hook == reinterpret_cast<FH3Hook*>(1)) installedDetour = hookCallbacks[hook];
+    if (hook == reinterpret_cast<FH3Hook*>(2)) installedTile = hookCallbacks[hook];
+    if (hook == reinterpret_cast<FH3Hook*>(3)) installedFocus = hookCallbacks[hook];
+    if (hook == reinterpret_cast<FH3Hook*>(6)) installedScene = hookCallbacks[hook];
+    if (hook == reinterpret_cast<FH3Hook*>(10)) installedUpdate = hookCallbacks[hook];
     return 1;
 }
 void stockTile(void*) {}
 FH3Hook* hookFunction(FH3Mod*, const char*, void* target, void* callback, void** next) {
-    if (target == image.data() + 0xb26690) return reinterpret_cast<FH3Hook*>(7);
-    if (target == image.data() + 0xadb350) return reinterpret_cast<FH3Hook*>(8);
-    if (target == image.data() + 0xadc940) return reinterpret_cast<FH3Hook*>(9);
-    if (target == image.data() + 0x200c1d0) return reinterpret_cast<FH3Hook*>(5);
-    if (target == image.data() + 0x1182cb0) { *next=reinterpret_cast<void*>(stockScene);installedScene=callback;return reinterpret_cast<FH3Hook*>(6); }
+    if (target == image.data() + 0xb26690) return remember(7, callback);
+    if (target == image.data() + 0xadb350) return remember(8, callback);
+    if (target == image.data() + 0xadc940) return remember(9, callback);
+    if (target == image.data() + 0x200c1d0) return remember(5, callback);
+    if (target == image.data() + 0x1182cb0) { *next=reinterpret_cast<void*>(stockScene);installedScene=callback;return remember(6, callback); }
     if (target != image.data() + 0x1579ab0) return nullptr;
     *next = reinterpret_cast<void*>(stockTile);
     installedTile = callback;
-    return reinterpret_cast<FH3Hook*>(2);
+    return remember(2, callback);
 }
 int disable(FH3Mod*, FH3Hook* hook) {
     std::lock_guard lock(hookMutex);
@@ -121,6 +135,7 @@ struct LoadedMod {
     Shutdown shutdown;
     using Capability = int (*)();
     Capability canShutdown;
+    Capability apply, state;
     bool active = true;
     explicit LoadedMod(const fs::path& path, const FH3ModApi& api) {
         // The real platform retains old modules and loads a fresh copy per F9.
@@ -135,6 +150,9 @@ struct LoadedMod {
         shutdown = reinterpret_cast<Shutdown>(GetProcAddress(dll, "fh3mod_shutdown"));
         auto runtime = reinterpret_cast<Capability>(GetProcAddress(dll, "fh3mod_runtime_toggle"));
         canShutdown = reinterpret_cast<Capability>(GetProcAddress(dll, "fh3mod_can_shutdown"));
+        apply = reinterpret_cast<Capability>(GetProcAddress(dll, "fh3mod_apply_runtime_load"));
+        state = reinterpret_cast<Capability>(GetProcAddress(dll, "fh3mod_runtime_load_state"));
+        require(apply && state, "stock-platform runtime controller exports missing");
         require(runtime && runtime() == 1 && canShutdown, "runtime Load/F9 exports missing");
         require(init && shutdown && init(&api) == 0, "platform initialization failed");
     }
@@ -350,7 +368,42 @@ int wmain(int argc, wchar_t** argv) {
                 "the game's commit changed");
         require(readFile(input->commit.parent_path() / L"data" / L"ProfileData", 16 << 20) ==
                 readFile(copied / L"data" / L"ProfileData", 16 << 20), "the game's save changed");
-        std::cout << "PASS: fresh/progressed journal, import summary, ledger migration, live events, save integrity, cold OFF, retained-DLL Off/On cycles, journal guard and shutdown event flush.\n";
+        const auto config = fixture / L"fh3-mods" / L"platform.ini";
+        std::ofstream(config) << "[dev]\nHotReload=1\nReloadKey=F9\n";
+        {
+            LoadedMod resident(dll, api);
+            require(waitFor([] { return installedDetour && installedTile; }), "resident startup hooks missing");
+            const auto definitions = hookCreations;
+            const auto ledger = contents(record);
+            for (int cycle = 0; cycle < 3; ++cycle) {
+                std::ofstream(disabled) << "FH3Achievements.dll\n";
+                require(resident.apply() == 1 && resident.state() == 0, "stock-platform Off/F9 failed");
+                {
+                    std::lock_guard lock(hookMutex);
+                    require(activeHooks == std::set<FH3Hook*>{reinterpret_cast<FH3Hook*>(10)},
+                            "Off must retain only the native notice-refresh hook");
+                }
+                require(!installedDetour && !installedTile, "Off left tracking or the journal tile active");
+                require(contents(record) == ledger, "Off changed earned achievements");
+                std::ofstream(disabled) << "OtherMod.dll\n";
+                require(resident.apply() == 1 && resident.state() == 1, "stock-platform On/F9 failed");
+                require(waitFor([] { return installedDetour && installedTile; }), "On did not restore cached hooks");
+                require(hookCreations == definitions, "re-enabling created duplicate hooks");
+            }
+            resident.stop();
+            require(contents(record) == ledger, "same-DLL Off/On changed achievement records");
+        }
+        std::ofstream(config) << "[dev]\nHotReload=0\n";
+        {
+            LoadedMod noHotReload(dll, api);
+            require(waitFor([] { return installedDetour && installedTile; }), "HotReload=0 startup failed");
+            std::ofstream(disabled) << "FH3Achievements.dll\n";
+            require(noHotReload.apply() == 0 && noHotReload.state() == 1,
+                    "HotReload=0 must retain restart-based Load behavior");
+            noHotReload.stop();
+        }
+        fs::remove(disabled);
+        std::cout << "PASS: save integrity/backfill, ledger migration, live events, shutdown flush, journal guard, retained-DLL reload, stock-platform same-DLL Off/On with no duplicate hooks and HotReload=0.\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
