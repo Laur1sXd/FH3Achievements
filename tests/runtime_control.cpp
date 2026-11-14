@@ -21,10 +21,30 @@ void require(bool ok, const char* text) { if (!ok) throw std::runtime_error(text
 template<class T> void put(uint8_t* base, size_t offset, T value) { std::memcpy(base + offset, &value, sizeof value); }
 void* expectedModel{};
 int notifications{};
+int rowNotifications{}, persisted{}, forwardedSets{}, forwardedButtons{};
+bool saveFails{};
+bool f9DuringAcceptRejected = true;
+const uint8_t* fixtureBase{};
 void notify(void* model, void*) {
     require(model == expectedModel, "notice used a discarded binding model");
     ++notifications;
 }
+void notifyPreview(void* model, void* descriptor) {
+    require(model == expectedModel, "preview refresh used a stale native UI model");
+    if (descriptor == reinterpret_cast<void*>(43)) ++rowNotifications;
+    else ++notifications;
+}
+void persistLoad(void*, const char*, int value) {
+    ++persisted;
+    f9DuringAcceptRejected = f9DuringAcceptRejected && !applyRuntimeLoad();
+    if (!saveFails) requested = value != 0;
+}
+void passthroughSet(void*, void*, void*) { ++forwardedSets; }
+void selectionSet(void*, void*, void* value) {
+    int selected{}; std::memcpy(&selected, static_cast<uint8_t*>(value) + 0x28, sizeof selected);
+    std::memcpy(const_cast<uint8_t*>(fixtureBase) + 0x2362a8, &selected, sizeof selected);
+}
+bool passthroughButtons(void*, int, bool) { ++forwardedButtons; return false; }
 }
 
 int main(int argc, char** argv) {
@@ -45,6 +65,8 @@ int main(int argc, char** argv) {
         for (int cycle = 0; cycle < 3; ++cycle) {
             requested = false; front = false; pressed = true; Sleep(70);
             require(runtimeLoadState() == 1, "background F9 toggled the mod");
+            front = true; Sleep(70);
+            require(runtimeLoadState() == 1, "a held background key toggled the mod on focus return");
             pressed = false; Sleep(60); front = true; pressed = true;
             const auto until = GetTickCount64() + 1500;
             while (runtimeLoadState() && GetTickCount64() < until) Sleep(5);
@@ -93,7 +115,80 @@ int main(int argc, char** argv) {
         require(notifications == 6, "notice did not refresh after every successful toggle");
         put(row, 0x68, 0); updateNotice(base, mod, page, -1, notify);
         require(read<int>(row + 0x6c) == 1, "HotReload=0 changed the restart baseline");
-        std::cout << "PASS: stock-platform F9 listener, held/background keys, repeated toggles, failure/journal guards, own-row notice lifecycle and fresh UI bindings.\n";
+
+        // Exercise the production row/button detours: no persistence callback
+        // until pressed A, cancellation on B/row/page exit, and F9 must read the
+        // accepted value rather than a currently displayed preview.
+        startRuntimeControl(&api, mod, true, {requestedState, start, stop, guard});
+        noticePlatform = base; nativeNotify = notifyPreview; fixtureBase = base;
+        previewReady = true;
+        originalLoadSet = passthroughSet; originalSelectionSet = selectionSet; originalButtons = passthroughButtons;
+        put(base, 0x2412a8, 3); put(base, 0x2362a8, 0);
+        put(row, 0x78, &persistLoad); put(row, 0x88, reinterpret_cast<void*>(43));
+        put(row, 0x68, 1); put(row, 0x6c, 1);
+        expectedModel = reinterpret_cast<void*>(500); put(base, 0x234e00, expectedModel);
+        requested = true; active = true; appliedNotice = 1;
+        std::array<uint8_t, 64> off{}, on{}, next{};
+        put(on.data(), 0x28, 1); put(next.data(), 0x28, 1);
+        auto* descriptor = reinterpret_cast<void*>(43);
+        const auto pending = [&] { return read<int>(row + 0x68) != read<int>(row + 0x6c); };
+        onLoadSet(descriptor, nullptr, off.data());
+        require(read<int>(row + 0x68) == 0 && requested && persisted == 0 && pending(), "selector preview must show its notice without persisting before A");
+        require(applyRuntimeLoad() && runtimeLoadState() == 1, "F9 applied an unaccepted Off preview");
+        onLoadButtons(page, 999999, true);
+        require(!preview.row && read<int>(row + 0x68) == 1 && requested && !pending(), "B did not restore the accepted value");
+        onLoadSet(descriptor, nullptr, off.data());
+        onLoadSelection(nullptr, nullptr, next.data());
+        require(!preview.row && read<int>(row + 0x68) == 1 && !pending(), "leaving the row did not discard its preview");
+        put(base, 0x2362a8, 0);
+        onLoadSet(descriptor, nullptr, off.data());
+        put(base, 0x2418a0, uint8_t{0});
+        updateNotice(base, mod, page, appliedNotice, nativeNotify);
+        require(!preview.row && read<int>(row + 0x68) == 1 && requested, "leaving the page did not discard its preview");
+        put(base, 0x2418a0, uint8_t{1});
+        onLoadSet(descriptor, nullptr, off.data());
+        onLoadButtons(page, 1000000, false);
+        require(requested && persisted == 0, "A release accepted a preview");
+        const int forwardsBeforeAccept = forwardedButtons;
+        require(onLoadButtons(page, 1000000, true), "pressed A was not consumed for Load acceptance");
+        onLoadButtons(page, 1000000, false);
+        require(forwardedButtons == forwardsBeforeAccept, "accepted Load button events reached an unrelated native action");
+        require(!requested && persisted == 1 && pending() && !preview.row && runtimeLoadState() == 1,
+                "A did not accept exactly one pending value without applying it");
+        // An accepted Off is pending; previewing On must not hide that pending
+        // state. F9 applies the accepted Off and leaves the On preview unsaved.
+        onLoadSet(descriptor, nullptr, on.data());
+        require(pending() && persisted == 1, "opposite preview erased the accepted pending request");
+        require(applyRuntimeLoad() && runtimeLoadState() == 0, "F9 did not apply the accepted Off value");
+        updateNotice(base, mod, page, appliedNotice, nativeNotify);
+        require(pending() && read<int>(row + 0x68) == 1 && !requested, "F9 must preserve an unsaved opposite preview notice without persisting it");
+        onLoadButtons(page, 999999, true);
+        require(read<int>(row + 0x68) == 0 && !pending(), "B did not restore accepted Off after F9");
+        onLoadSet(descriptor, nullptr, on.data());
+        require(pending(), "unaccepted On preview did not show its notice");
+        onLoadButtons(page, 1000000, true); onLoadButtons(page, 1000000, false);
+        require(requested && pending() && persisted == 2, "On acceptance did not become pending");
+        require(applyRuntimeLoad() && runtimeLoadState() == 1, "F9 did not apply accepted On");
+        updateNotice(base, mod, page, appliedNotice, nativeNotify);
+        require(!pending(), "On application did not clear the pending notice");
+        saveFails = true;
+        onLoadSet(descriptor, nullptr, off.data());
+        onLoadButtons(page, 1000000, true); onLoadButtons(page, 1000000, false);
+        require(preview.row && requested && pending(), "failed acceptance lost the preview notice or replaced the saved request");
+        onLoadButtons(page, 999999, true); saveFails = false;
+        const auto oldForwards = forwardedSets;
+        onLoadSet(reinterpret_cast<void*>(99), nullptr, off.data());
+        require(forwardedSets == oldForwards + 1 && read<int>(first.data() + 0x6c) == 77, "preview gate intercepted another row");
+        require(rowNotifications > 0, "cancellation did not refresh the selector");
+        require(f9DuringAcceptRejected, "F9 read a partially accepted request");
+        stopRuntimeControl();
+        appliedNotice = -1; put(row, 0x68, 1); put(row, 0x6c, 1); requested = true;
+        onLoadSet(descriptor, nullptr, off.data());
+        require(pending(), "HotReload=0 preview did not show its notice");
+        onLoadButtons(page, 1000000, true); onLoadButtons(page, 1000000, false);
+        require(!requested && pending() && !applyRuntimeLoad(), "HotReload=0 lost acceptance or restart semantics");
+        stopRuntimePreview();
+        std::cout << "PASS: F9 listener, acceptance-only persistence, row/page/B rollback, accepted-only F9 while previewing, pending notice lifecycle, failure guards and fresh UI bindings.\n";
     } catch (const std::exception& error) {
         stopRuntimeControl();
         std::cerr << error.what() << '\n'; return 1;
