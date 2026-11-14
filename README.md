@@ -43,12 +43,20 @@ The harness checks the original tile hook target, page generation with fresh and
 
 ## Hot reload
 
-Full **Load FH3 Achievements → Off/On → F9** switching requires the separate
-Mod Platform compatibility build and `[dev] HotReload=1`. Close the Achievements
-journal before pressing the reload key (F9 by default, or `ReloadKey` if changed).
-Off stops tracking and pop-ups; On resumes them without restarting. Existing
-records and pending live progress are preserved. The startup scene stays
-registered so the journal can reopen after enabling the mod.
+With stock **FH3 Mod Platform 1.4.2** and `[dev] HotReload=1` in
+`fh3-mods/platform.ini`, Achievements handles its own Load changes. No replacement
+platform DLL is needed.
 
-Stock Mod Platform 1.3.0 only reloads changed DLLs. Its Load switch, and Load
-changes with `HotReload=0`, still require a game restart.
+Change **Load FH3 Achievements**, accept the selection, close the Achievements
+journal, then press F9 (or your configured `ReloadKey`). Off stops tracking and
+pop-ups; On starts them again in the same session. Earned achievements and live
+counters are preserved. The bottom pending-change notice clears after a successful
+F9 apply and returns when the Load selection changes again.
+
+While Off, only the F9 listener and native notice refresh remain active. Hooks are
+reused when enabling the mod again. With `HotReload=0`, Load changes retain their
+normal restart behavior.
+
+The stock loader skips DLLs that are Off when the game starts. If you start with
+Achievements Off, select On and restart once to load it; subsequent Off/On changes
+in that session work with F9. Close Azimuth before first installing this updated DLL.
