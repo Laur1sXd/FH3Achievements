@@ -4,6 +4,7 @@
 #include "import_notice.hpp"
 #include "journal.hpp"
 #include "overlay.hpp"
+#include "runtime.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -348,6 +349,33 @@ void run(HINSTANCE instance) {
         log(std::string("Achievement worker stopped: ") + error.what());
     }
 }
+
+bool resumeTracking() {
+    if (worker.joinable()) return false;
+    HMODULE instance{};
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(&stopping), &instance)) return false;
+    stopping = false;
+    enableImportNotice(popups);
+    worker = std::thread(run, instance);
+    return true;
+}
+
+void stopTracking() {
+    enableImportNotice(false);
+    stopping = true;
+    if (worker.joinable()) worker.join();
+    stopJournal(runtimeControlEnabled());
+    stopImportNotice();
+    if (api && mod) stopEventReader(api, mod);
+    if (api && mod) log("Achievements stopped; worker, tracking hooks and notification window are off.");
+}
+bool canStopTracking() {
+    if (journalCanShutdown()) return true;
+    log("Close the Achievements journal before applying its Load setting with F9.");
+    return false;
+}
+bool requestedRuntimeLoad() { return loadRequested(fs::path(api->azimuth_dir)); }
 }
 
 FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* platform) {
@@ -389,16 +417,14 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* platform) {
         setting.on_change = onPopups;
         api->add_setting(mod, &setting);
 
-        if (!loadRequested(install)) {
+        const bool wanted = loadRequested(install);
+        startRuntimeControl(api, mod, wanted, {requestedRuntimeLoad, resumeTracking, stopTracking, canStopTracking});
+        if (!wanted) {
             log("Load Achievements is OFF; registered the scene and settings without starting tracking or hooks.");
             return 0;
         }
 
-        HMODULE instance = nullptr;
-        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                reinterpret_cast<const wchar_t*>(&stopping), &instance)) return 1;
-        stopping = false;
-        worker = std::thread(run, instance);
+        if (!resumeTracking()) return 1;
         return 0;
     } catch (const std::exception& error) {
         log(error.what());
@@ -407,19 +433,14 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* platform) {
 }
 
 FH3MOD_EXPORT void fh3mod_shutdown() {
-    enableImportNotice(false);
-    stopping = true;
-    if (worker.joinable()) worker.join();
-    stopJournal();
-    stopImportNotice();
-    if (api && mod) stopEventReader(api, mod);
-    if (api && mod) log("Achievements stopped; worker, tracking hooks and notification window are off.");
+    stopRuntimeControl();
+    stopTracking();
 }
 
-// Opt in to the separate Mod Platform compatibility build's Load/F9 workflow.
+// Lifecycle capabilities for host loaders; stock-platform switching lives in runtime.cpp.
 FH3MOD_EXPORT int fh3mod_runtime_toggle() { return 1; }
 FH3MOD_EXPORT int fh3mod_can_shutdown() {
-    if (journalCanShutdown()) return 1;
-    log("Close the Achievements journal before applying its Load setting with F9.");
-    return 0;
+    return canStopTracking() ? 1 : 0;
 }
+FH3MOD_EXPORT int fh3mod_apply_runtime_load() { return applyRuntimeLoad() ? 1 : 0; }
+FH3MOD_EXPORT int fh3mod_runtime_load_state() { return runtimeLoadState(); }
