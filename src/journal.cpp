@@ -269,6 +269,7 @@ void onFocus(void* page) {
     } else if (journalPage != page) {
         journalPage = nullptr;
         journalModel = nullptr;
+        requestedAt = 0;
     }
     originalFocus(page);
 }
@@ -382,6 +383,14 @@ void stopJournal() {
     if (!api || !mod) return;
     for (auto it = hooks.rbegin(); it != hooks.rend(); ++it)
         if (*it) api->disable_hooks(mod, *it);
-    if (api->clear_file) api->clear_file(mod, JournalFile);
+    hooks.fill(nullptr);
+    // FH3 mounts this scene once. Retain its file across Off/On so the next
+    // DLL can reopen it without requiring a game restart to remount assets.
+}
+
+bool journalCanShutdown() {
+    const auto asked = requestedAt.load();
+    return !journalPage.load() && !sceneRedirected.load() &&
+        (!asked || GetTickCount64() - asked > 2500);
 }
 }
