@@ -327,6 +327,20 @@ void onTile(void* page) {
 }
 }
 
+bool platformJournalRouteReady(const uint8_t* base) {
+    if (!base) return false;
+    // Mod Platform validates stock UI code and vtable slots after building the
+    // Mods pages. Leave those unchanged until its shared page hooks are wired.
+    // wait_for_code alone can return before a slow database/UI build finishes.
+    __try {
+        auto* const* vtable = reinterpret_cast<void* const*>(base + HudVtable);
+        return vtable[148] && vtable[179] &&
+            vtable[148] != base + 0x13a19a0 && vtable[179] != base + 0x14981a0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool installJournal(const FH3ModApi* platform, FH3Mod* handle, const uint8_t* base) {
     if (!platform->set_file || !platform->hook_function || !platform->hook_pointer ||
         !platform->enable_hooks || !hasHudRoute(platform->game_dir)) return false;
