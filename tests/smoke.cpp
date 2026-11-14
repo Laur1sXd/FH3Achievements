@@ -4,7 +4,6 @@
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -167,10 +166,19 @@ int wmain(int argc, wchar_t** argv) {
         api.enable_hooks = enable;
         api.disable_hooks = disable;
         std::string firstRun;
+        auto** initialHudSlots = reinterpret_cast<void**>(image.data() + 0x4566590);
+        initialHudSlots[148] = image.data() + 0x13a19a0;
+        initialHudSlots[179] = image.data() + 0x14981a0;
         {
             LoadedMod running(dll, api);
             require(!capturedPage.empty(), "journal scene must register during initialization, before FH3 mounts files");
             require(waitFor([] { return installedDetour.load() != nullptr; }), "event hook setup timed out");
+            Sleep(400);
+            require(installedTile.load() == nullptr, "journal must wait while native MODS route is uninitialized");
+            // Model a slow Mod Platform database/UI build completing later.
+            auto** hudSlots = reinterpret_cast<void**>(image.data() + 0x4566590);
+            hudSlots[148] = reinterpret_cast<void*>(stockFocus);
+            hudSlots[179] = reinterpret_cast<void*>(stockTile);
             require(waitFor([] { return installedTile.load() != nullptr; }), "original tile binding timed out");
             auto openTile = reinterpret_cast<void (*)(void*)>(installedTile.load());
             openTile(nullptr);
