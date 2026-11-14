@@ -393,6 +393,17 @@ int wmain(int argc, wchar_t** argv) {
             resident.stop();
             require(contents(record) == ledger, "same-DLL Off/On changed achievement records");
         }
+        std::ofstream(disabled) << "FH3Achievements.dll\n";
+        {
+            LoadedMod residentOff(dll, api);
+            require(residentOff.state() == 0 && !installedDetour && !installedTile,
+                    "refreshing an Off DLL started tracking");
+            std::ofstream(disabled) << "OtherMod.dll\n";
+            require(residentOff.apply() == 1, "an Off refreshed DLL could not activate");
+            require(waitFor([] { return installedDetour && installedTile; }),
+                    "refreshed Off DLL did not restore the journal/tracking hooks");
+            residentOff.stop();
+        }
         std::ofstream(config) << "[dev]\nHotReload=0\n";
         {
             LoadedMod noHotReload(dll, api);
