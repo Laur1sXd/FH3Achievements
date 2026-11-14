@@ -2,6 +2,7 @@
 #include "runtime.hpp"
 #include <windows.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <filesystem>
@@ -18,6 +19,7 @@ std::mutex controlMutex;
 std::thread listener;
 std::atomic<bool> quitting = false, enabled = false, active = false;
 std::atomic<int> appliedNotice = -1;
+std::atomic<unsigned> acceptedWriteEpoch = 0;
 const uint8_t* noticePlatform = nullptr;
 bool noticeRefresh = false; // only used on the native UI thread
 UINT reloadKey = VK_F9;
@@ -25,6 +27,20 @@ auto keyState = &GetAsyncKeyState;
 auto foreground = &GetForegroundWindow;
 auto windowPid = &GetWindowThreadProcessId;
 using Notify = void (*)(void*, void*);
+using Setter = void (*)(void*, void*, void*);
+using Buttons = bool (*)(void*, int, bool);
+Setter originalLoadSet = nullptr, originalSelectionSet = nullptr;
+Buttons originalButtons = nullptr;
+std::array<FH3Hook*, 3> previewHooks{};
+std::atomic<bool> previewReady = false;
+struct LoadPreview {
+    uint8_t* row = nullptr;
+    void* page = nullptr;
+    int selection = 0, accepted = 0, boot = 0;
+} preview;
+bool acceptRelease = false;
+thread_local bool refreshingBindings = false;
+Notify nativeNotify = nullptr;
 
 template<class T> T read(const void* address) {
     T value{};
@@ -103,13 +119,93 @@ uint8_t* loadRow(const uint8_t* base, FH3Mod* mod) {
     return nullptr;
 }
 
+void* ownSettingsPage(const uint8_t* base, FH3Mod* mod) {
+    if (!base || !read<uint8_t>(base + 0x2418a0)) return nullptr;
+    const int view = read<int>(base + 0x2412a8);
+    const auto begin = read<uintptr_t>(base + 0x241da0), end = read<uintptr_t>(base + 0x241da8);
+    if (view <= 0 || !begin || end < begin || end - begin > 0xb0 * 4096 ||
+        static_cast<size_t>(view) > (end - begin) / 0xb0) return nullptr;
+    if (read<FH3Mod*>(reinterpret_cast<void*>(begin + (view - 1) * 0xb0 + 0xa0)) != mod) return nullptr;
+    return read<void*>(base + 0x2362c0);
+}
+
+bool safeNotify(Notify notify, void* model, void* descriptor) {
+    if (!notify || !model || !descriptor) return false;
+    __try { notify(model, descriptor); return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+void refreshLoadValue(uint8_t* row) {
+    const bool previous = refreshingBindings;
+    refreshingBindings = true;
+    safeNotify(nativeNotify, read<void*>(noticePlatform + 0x234e00), read<void*>(row + 0x88));
+    refreshingBindings = previous;
+    noticeRefresh = true;
+}
+
+void discardPreview(bool notify = true) {
+    if (!preview.row) return;
+    auto* row = preview.row;
+    const int baseline = appliedNotice < 0 ? preview.boot : appliedNotice.load();
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(row + 0x68), preview.accepted);
+    std::memcpy(row + 0x6c, &baseline, sizeof baseline);
+    preview = {};
+    noticeRefresh = true;
+    if (notify) refreshLoadValue(row);
+}
+
+bool callAcceptedChange(uint8_t* row, int value) {
+    using Changed = void (*)(void*, const char*, int);
+    const auto changed = read<Changed>(row + 0x78);
+    if (!changed) return false;
+    __try {
+        changed(read<void*>(row + 0x80), reinterpret_cast<const char*>(row + 9), value);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+bool acceptPreview() {
+    if (!preview.row) return false;
+    const int wanted = read<int>(preview.row + 0x68);
+    try {
+        if (wanted != preview.accepted) {
+            struct AcceptedWrite {
+                AcceptedWrite() { ++acceptedWriteEpoch; }
+                ~AcceptedWrite() { ++acceptedWriteEpoch; }
+            } writing;
+            if (!callAcceptedChange(preview.row, wanted) || actions.requested() != (wanted != 0)) {
+                host->log(owner, "Could not accept Load Achievements. Press A to retry or B to discard.");
+                return false;
+            }
+        }
+        preview.accepted = wanted;
+        discardPreview();
+        host->log(owner, "Accepted Load Achievements; F9 applies this saved value.");
+        return true;
+    } catch (...) {
+        host->log(owner, "Could not save the accepted Load setting; the previous value remains active.");
+        return false;
+    }
+}
+
 void updateNotice(const uint8_t* base, FH3Mod* mod, void* page, int applied, Notify notify) {
-    if (!base || applied < 0 || !read<uint8_t>(base + 0x2418a0) ||
-        read<void*>(base + 0x2362c0) != page) return;
+    if (!base) return;
+    if (preview.row && (preview.page != ownSettingsPage(base, mod) ||
+        preview.selection != read<int>(base + 0x2362a8))) discardPreview();
+    if (!read<uint8_t>(base + 0x2418a0) || read<void*>(base + 0x2362c0) != page) return;
     auto* row = loadRow(base, mod);
     if (!row) return;
-    if (read<int>(row + 0x6c) != applied) {
-        std::memcpy(row + 0x6c, &applied, sizeof applied);
+    int baseline = applied;
+    if (preview.row == row) {
+        const int actual = applied < 0 ? preview.boot : applied;
+        const int shown = read<int>(row + 0x68);
+        // Previewing a different value shows the notice, but cannot erase an
+        // earlier accepted request which is still waiting for F9.
+        const bool pending = shown != actual || preview.accepted != actual;
+        baseline = pending ? 1 - shown : shown;
+    }
+    if (baseline >= 0 && read<int>(row + 0x6c) != baseline) {
+        std::memcpy(row + 0x6c, &baseline, sizeof baseline);
         noticeRefresh = true;
     }
     if (!noticeRefresh) return;
@@ -117,8 +213,61 @@ void updateNotice(const uint8_t* base, FH3Mod* mod, void* page, int applied, Not
     auto* model = read<void*>(base + 0x234e00);
     auto* descriptor = read<void*>(base + 0x235b10);
     if (!model || !descriptor) return;
-    notify(model, descriptor);
-    noticeRefresh = false;
+    noticeRefresh = !safeNotify(notify, model, descriptor);
+}
+
+void onLoadSet(void* descriptor, void* model, void* value) {
+    auto* row = noticePlatform ? loadRow(noticePlatform, owner) : nullptr;
+    if (row && descriptor == read<void*>(row + 0x88)) {
+        if (refreshingBindings) return;
+        auto* page = ownSettingsPage(noticePlatform, owner);
+        int wanted{}; SIZE_T bytes{};
+        if (previewReady && page && value && ReadProcessMemory(GetCurrentProcess(),
+            static_cast<uint8_t*>(value) + 0x28, &wanted, sizeof wanted, &bytes) && bytes == sizeof wanted &&
+            (wanted == 0 || wanted == 1)) {
+            const int selected = read<int>(noticePlatform + 0x2362a8);
+            if (preview.row && (preview.page != page || preview.selection != selected)) discardPreview();
+            if (!preview.row) preview = {row, page, selected, read<int>(row + 0x68), read<int>(row + 0x6c)};
+            InterlockedExchange(reinterpret_cast<volatile LONG*>(row + 0x68), wanted);
+            updateNotice(noticePlatform, owner, page, appliedNotice, nativeNotify);
+            return; // Preview only: never persist a selector movement.
+        }
+    }
+    originalLoadSet(descriptor, model, value);
+}
+
+void onLoadSelection(void* descriptor, void* model, void* value) {
+    originalSelectionSet(descriptor, model, value);
+    if (preview.row && preview.selection != read<int>(noticePlatform + 0x2362a8)) discardPreview();
+}
+
+bool onLoadButtons(void* page, int button, bool pressed) {
+    constexpr int Accept = 1000000, Back = 999999;
+    if (button == Accept && !pressed && acceptRelease) { acceptRelease = false; return true; }
+    if (preview.row) {
+        if (preview.page != ownSettingsPage(noticePlatform, owner) ||
+            preview.selection != read<int>(noticePlatform + 0x2362a8) ||
+            (page == preview.page && button == Back && pressed)) discardPreview();
+        else if (page == preview.page && button == Accept && pressed) {
+            acceptPreview();
+            acceptRelease = true;
+            updateNotice(noticePlatform, owner, page, appliedNotice, nativeNotify);
+            return true;
+        }
+    }
+    const bool result = originalButtons(page, button, pressed);
+    updateNotice(noticePlatform, owner, page, appliedNotice, nativeNotify);
+    return result;
+}
+
+bool matches(const uint8_t* code, const char* expected, size_t size) {
+    std::array<uint8_t, 16> actual{}; SIZE_T bytes{};
+    if (size > actual.size() || !ReadProcessMemory(GetCurrentProcess(), code, actual.data(), size, &bytes) || bytes != size) return false;
+    if (std::memcmp(actual.data(), expected, size) == 0) return true;
+    if (size < 6 || actual[0] != 0xe9 || std::memcmp(actual.data() + 5, expected + 5, size - 5)) return false;
+    int32_t offset{}; std::memcpy(&offset, actual.data() + 1, sizeof offset);
+    const auto relay = read<std::array<uint8_t, 6>>(code + 5 + offset);
+    return relay == std::array<uint8_t, 6>{0xff, 0x25, 0, 0, 0, 0};
 }
 
 void monitor() {
@@ -127,8 +276,15 @@ void monitor() {
         DWORD pid{};
         const auto window = foreground();
         const bool front = window && windowPid(window, &pid) && pid == GetCurrentProcessId();
-        const bool pressed = front && (keyState(static_cast<int>(reloadKey)) & 0x8000) != 0;
-        if (pressed && !down) applyRuntimeLoad();
+        const bool pressed = (keyState(static_cast<int>(reloadKey)) & 0x8000) != 0;
+        if (pressed && !down && front) {
+            // Focus can change between the first sample and the key sample.
+            // Recheck it at the edge; held background keys are still tracked.
+            DWORD currentPid{};
+            const auto current = foreground();
+            if (current == window && windowPid(current, &currentPid) && currentPid == GetCurrentProcessId())
+                applyRuntimeLoad();
+        }
         down = pressed;
         Sleep(25);
     }
@@ -137,8 +293,11 @@ void monitor() {
 
 void startRuntimeControl(const FH3ModApi* api, FH3Mod* mod, bool initial, RuntimeActions callbacks) {
     host = api; owner = mod; actions = callbacks; active = initial;
+    quitting = false;
     const auto config = std::filesystem::path(api->azimuth_dir) / L"fh3-mods/platform.ini";
     const auto* module = hostModule();
+    noticePlatform = stockNoticeLayout(module) ? module : nullptr;
+    nativeNotify = noticePlatform ? reinterpret_cast<Notify>(const_cast<uint8_t*>(noticePlatform) + 0xbc420) : nullptr;
     if (!GetPrivateProfileIntW(L"dev", L"HotReload", 0, config.c_str()) || sharedRuntimeLoader(module)) return;
     wchar_t key[16]{};
     GetPrivateProfileStringW(L"dev", L"ReloadKey", L"F9", key, 16, config.c_str());
@@ -146,7 +305,6 @@ void startRuntimeControl(const FH3ModApi* api, FH3Mod* mod, bool initial, Runtim
         const int n = _wtoi(key + 1);
         if (n >= 1 && n <= 12) reloadKey = VK_F1 + n - 1;
     }
-    noticePlatform = stockNoticeLayout(module) ? module : nullptr;
     appliedNotice = initial ? 1 : 0;
     quitting = false;
     enabled = true;
@@ -159,7 +317,10 @@ bool applyRuntimeLoad() {
     std::lock_guard lock(controlMutex);
     if (!enabled || quitting) return false;
     try {
+        const unsigned epoch = acceptedWriteEpoch;
+        if (epoch & 1) return false;
         const bool wanted = actions.requested();
+        if (acceptedWriteEpoch != epoch) return false;
         if (wanted == active) return true;
         if (!actions.canStop()) return false;
         if (wanted) {
@@ -181,6 +342,33 @@ void stopRuntimeControl() {
     if (listener.joinable()) listener.join();
     enabled = false;
     appliedNotice = -1;
+}
+
+bool installRuntimePreview() {
+    if (previewReady) return true;
+    if (quitting || !noticePlatform || !host->hook_function || !host->enable_hooks || !host->disable_hooks) return false;
+    if (!matches(noticePlatform + 0xda1a0, "\x41\x57\x41\x56\x41\x54\x56\x57\x53\x48", 10) ||
+        !matches(noticePlatform + 0xdfe70, "\x41\x57\x41\x56\x41\x55\x41\x54\x56\x57", 10) ||
+        !matches(noticePlatform + 0xdd320, "\x56\x57\x48\x83\xec\x58\x4d\x85\xc0\x74", 10)) return false;
+    auto* base = const_cast<uint8_t*>(noticePlatform);
+    if (!previewHooks[0]) previewHooks[0] = host->hook_function(owner, "Achievements Load preview binding", base + 0xdfe70,
+        reinterpret_cast<void*>(onLoadSet), reinterpret_cast<void**>(&originalLoadSet));
+    if (!previewHooks[1]) previewHooks[1] = host->hook_function(owner, "Achievements Load Accept and Back", base + 0xda1a0,
+        reinterpret_cast<void*>(onLoadButtons), reinterpret_cast<void**>(&originalButtons));
+    if (!previewHooks[2]) previewHooks[2] = host->hook_function(owner, "Achievements Load row selection", base + 0xdd320,
+        reinterpret_cast<void*>(onLoadSelection), reinterpret_cast<void**>(&originalSelectionSet));
+    for (auto* hook : previewHooks) {
+        if (!hook || !host->enable_hooks(owner, hook)) { stopRuntimePreview(); return false; }
+    }
+    previewReady = true;
+    host->log(owner, "Load preview ready: press A to accept; leaving the row or page discards it.");
+    return true;
+}
+
+void stopRuntimePreview() {
+    previewReady = false;
+    discardPreview(false);
+    for (auto* hook : previewHooks) if (hook) host->disable_hooks(owner, hook);
 }
 bool runtimeControlEnabled() { return enabled && !quitting; }
 int runtimeLoadState() { return active ? 1 : 0; }
