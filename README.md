@@ -47,13 +47,19 @@ With stock **FH3 Mod Platform 1.4.2** and `[dev] HotReload=1` in
 `fh3-mods/platform.ini`, Achievements handles its own Load changes. No replacement
 platform DLL is needed.
 
-Change **Load FH3 Achievements**, accept the selection, close the Achievements
-journal, then press F9 (or your configured `ReloadKey`). Off stops tracking and
-pop-ups; On starts them again in the same session. Earned achievements and live
-counters are preserved. The bottom pending-change notice clears after a successful
-F9 apply and returns when the Load selection changes again.
+Change **Load FH3 Achievements** to preview On or Off. Press **A / Accept**
+to save that selection. The notice appears while previewing. Leaving the row or page, or pressing
+B without accepting, restores the last accepted value and clears a preview-only
+notice. An earlier accepted request stays pending. F9 always reads the
+accepted value, even while a different value is being previewed.
 
-While Off, only the F9 listener and native notice refresh remain active. Hooks are
+Close the Achievements journal, then press F9 (or your configured `ReloadKey`)
+to apply the accepted selection. Off stops tracking and pop-ups; On starts them
+again in the same session. Earned achievements and live counters are preserved.
+The bottom pending-change notice clears after a successful F9 apply and returns
+when a different value is previewed or another change is accepted.
+
+While Off, only the F9 listener and Load-control UI hooks remain active. Hooks are
 reused when enabling the mod again. With `HotReload=0`, Load changes retain their
 normal restart behavior.
 
