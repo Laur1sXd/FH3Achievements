@@ -344,6 +344,15 @@ bool platformJournalRouteReady(const uint8_t* base) {
     }
 }
 
+bool installJournalNoticeRefresh(const FH3ModApi* platform, FH3Mod* handle, const uint8_t* base) {
+    if (!platformJournalRouteReady(base) || !platform->hook_pointer || !platform->enable_hooks) return false;
+    api = platform; mod = handle; game = base;
+    auto** vtable = reinterpret_cast<void**>(const_cast<uint8_t*>(base) + HudVtable);
+    if (!hooks[5]) hooks[5] = api->hook_pointer(mod, "Achievement page update", &vtable[175],
+        reinterpret_cast<void*>(onUpdate), reinterpret_cast<void**>(&originalUpdate));
+    return hooks[5] && api->enable_hooks(mod, hooks[5]);
+}
+
 bool installJournal(const FH3ModApi* platform, FH3Mod* handle, const uint8_t* base) {
     if (!platform->set_file || !platform->hook_function || !platform->hook_pointer ||
         !platform->enable_hooks || !hasHudRoute(platform->game_dir)) return false;
