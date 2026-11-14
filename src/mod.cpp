@@ -282,11 +282,20 @@ void run(HINSTANCE instance) {
         if (eventsEnabled) addLiveProgress(state.progress, {});
         publishJournal(state.progress, state.record.unlocks);
         Overlay overlay(instance);
-        log(codeReady && installJournal(api, mod, game) ? "Native Progress / Achievements tile linked." :
-                                                        "Native achievement page route unavailable.");
+        bool journalLinked = false;
+        if (codeReady) log("Waiting for Mod Platform's MODS menu before linking Achievements.");
+        else log("Native achievement page route unavailable.");
+        ULONGLONG journalRetryAfter = 0;
         ULONGLONG readAfter = 0;
         while (!stopping) {
             const auto now = GetTickCount64();
+            if (codeReady && !journalLinked && now >= journalRetryAfter) {
+                journalRetryAfter = now + 250;
+                if (platformJournalRouteReady(game)) {
+                    journalLinked = installJournal(api, mod, game);
+                    if (journalLinked) log("Native Progress / Achievements tile linked.");
+                }
+            }
             if (now >= readAfter) {
                 readAfter = now + 2000;
                 try {
