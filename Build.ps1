@@ -22,9 +22,11 @@ $dll = Join-Path $OutDir 'FH3Achievements.dll'
 if ($LASTEXITCODE) { throw 'SQLite build failed.' }
 $common = @('-std=c++20', '-fms-extensions', '-O2', '-static', '-DNOMINMAX', '-DWIN32_LEAN_AND_MEAN', '-D_WIN32_WINNT=0x0A00',
             '-Wall', '-Wextra', '-Werror', "-I$src", "-I$sdk", "-I$sqlite")
-& $cpp @common -shared "$src\mod.cpp" "$src\journal.cpp" "$src\journal_xaml.cpp" "$src\overlay.cpp" "$src\import_notice.cpp" "$src\events.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -luser32 -lgdi32 -o $dll
+& $cpp @common -shared "$src\mod.cpp" "$src\runtime.cpp" "$src\journal.cpp" "$src\journal_xaml.cpp" "$src\overlay.cpp" "$src\import_notice.cpp" "$src\events.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -luser32 -lgdi32 -o $dll
 if ($LASTEXITCODE) { throw 'FH3 Achievements build failed.' }
 if ($SmokeTest) {
     & $cpp @common -municode "$PSScriptRoot\tests\smoke.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -o "$OutDir\smoke.exe"
     if ($LASTEXITCODE) { throw 'Smoke test build failed.' }
+    & $cpp @common "$PSScriptRoot\tests\runtime_control.cpp" -luser32 -o "$OutDir\runtime-test.exe"
+    if ($LASTEXITCODE) { throw 'Runtime controller test build failed.' }
 }
