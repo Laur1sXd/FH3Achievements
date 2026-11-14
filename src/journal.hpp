@@ -13,6 +13,6 @@ std::string journalXaml(const ProgressList& progress, const Unlocks& unlocks);
 bool installJournal(const FH3ModApi* api, FH3Mod* mod, const uint8_t* game);
 bool platformJournalRouteReady(const uint8_t* game);
 void publishJournal(const ProgressList& progress, const Unlocks& unlocks);
-void stopJournal();
+void stopJournal(bool keepNoticeRefresh = false);
 bool journalCanShutdown();
 }
