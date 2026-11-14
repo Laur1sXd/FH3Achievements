@@ -321,7 +321,10 @@ void run(HINSTANCE instance) {
                 journalRetryAfter = now + 250;
                 if (platformJournalRouteReady(game)) {
                     journalLinked = installJournal(api, mod, game);
-                    if (journalLinked) log("Native Progress / Achievements tile linked.");
+                    if (journalLinked) {
+                        log("Native Progress / Achievements tile linked.");
+                        installRuntimePreview();
+                    }
                 }
             }
             if (now >= readAfter) {
@@ -435,6 +438,7 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* platform) {
 FH3MOD_EXPORT void fh3mod_shutdown() {
     stopRuntimeControl();
     stopTracking();
+    stopRuntimePreview();
 }
 
 // Lifecycle capabilities for host loaders; stock-platform switching lives in runtime.cpp.
