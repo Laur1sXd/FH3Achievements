@@ -92,7 +92,7 @@ bool installEventReader(const FH3ModApi* api, FH3Mod* mod, const uint8_t* base) 
     game = base;
     if (!api->hook_pointer || !api->enable_hooks) return false;
     auto* slot = const_cast<uint8_t*>(base) + 0x2cf01a0;
-    hook = api->hook_pointer(mod, "FH3 achievement events (EtxEventWrite)", reinterpret_cast<void**>(slot),
+    if (!hook) hook = api->hook_pointer(mod, "FH3 achievement events (EtxEventWrite)", reinterpret_cast<void**>(slot),
                              reinterpret_cast<void*>(eventWrite), &original);
     const bool installed = hook && original && api->enable_hooks(mod, hook);
     std::lock_guard lock(mutex);
@@ -105,7 +105,6 @@ void stopEventReader(const FH3ModApi* api, FH3Mod* mod) {
         accepting = false;
     }
     if (hook) api->disable_hooks(mod, hook);
-    hook = nullptr;
 }
 
 LiveProgress takeEvents() {
