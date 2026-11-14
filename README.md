@@ -40,3 +40,15 @@ The harness checks the original tile hook target, page generation with fresh and
 - Save format compatibility follows the Azimuth FH3 Save Editor, with format research by Doliman100 / ForzaTech and Nenkai / ForzaTools. The mod reads the necessary lookup tables from the running game.
 - The Xbox One achievement catalog was cross-checked against Xbox achievement listings and Forza Support's career totals. [TrueAchievements catalog](https://www.trueachievements.com/game/Forza-Horizon-3/achievements), [Forza Support career totals](https://support.forza.net/hc/en-us/articles/360005370173-FH3-Progress)
 - SQLite is public domain. The mod source is GPL-3.0. The package contains the mod only.
+
+## Hot reload
+
+Full **Load FH3 Achievements → Off/On → F9** switching requires the separate
+Mod Platform compatibility build and `[dev] HotReload=1`. Close the Achievements
+journal before pressing the reload key (F9 by default, or `ReloadKey` if changed).
+Off stops tracking and pop-ups; On resumes them without restarting. Existing
+records and pending live progress are preserved. The startup scene stays
+registered so the journal can reopen after enabling the mod.
+
+Stock Mod Platform 1.3.0 only reloads changed DLLs. Its Load switch, and Load
+changes with `HotReload=0`, still require a game restart.
