@@ -188,7 +188,41 @@ int main(int argc, char** argv) {
         onLoadButtons(page, 1000000, true); onLoadButtons(page, 1000000, false);
         require(!requested && pending() && !applyRuntimeLoad(), "HotReload=0 lost acceptance or restart semantics");
         stopRuntimePreview();
-        std::cout << "PASS: F9 listener, acceptance-only persistence, row/page/B rollback, accepted-only F9 while previewing, pending notice lifecycle, failure guards and fresh UI bindings.\n";
+
+        // Exact user flow in both directions, changing the native binding
+        // model on every mod/list reopen. F9 is applied only after free roam.
+        requested = true;
+        startRuntimeControl(&api, mod, true, {requestedState, start, stop, guard});
+        noticePlatform = base; nativeNotify = notifyPreview; previewReady = true;
+        put(row, 0x68, 1); put(row, 0x6c, 1);
+        uintptr_t modelId = 700;
+        const auto enter = [&](int view) {
+            put(base, 0x2418a0, uint8_t{1}); put(base, 0x2412a8, view); put(base, 0x2362a8, 0);
+            expectedModel = reinterpret_cast<void*>(++modelId); put(base, 0x234e00, expectedModel);
+            updateNotice(base, mod, page, appliedNotice, nativeNotify);
+        };
+        for (const int desired : {0, 1}) {
+            const int acceptedBefore = requested ? 1 : 0;
+            std::array<uint8_t, 64> value{}; put(value.data(), 0x28, desired);
+            enter(3); onLoadSet(descriptor, nullptr, value.data());
+            require(pending(), "preview did not show the notice on the mod page");
+            onLoadButtons(page, 999999, true); enter(0); enter(3);
+            require(read<int>(row + 0x68) == acceptedBefore && !pending() && requested == (acceptedBefore != 0),
+                    "Back/list/mod round trip without A did not restore the accepted value and clear its preview notice");
+            onLoadSet(descriptor, nullptr, value.data());
+            onLoadButtons(page, 1000000, true); onLoadButtons(page, 1000000, false);
+            require(pending(), "A did not retain the accepted pending notice on the mod page");
+            onLoadButtons(page, 999999, true); enter(0);
+            require(pending(), "accepted pending notice disappeared in the MODS list");
+            enter(3); require(pending(), "accepted pending notice disappeared when reopening the mod");
+            onLoadButtons(page, 999999, true); enter(0);
+            put(base, 0x2418a0, uint8_t{0});
+            require(applyRuntimeLoad() && runtimeLoadState() == desired, "F9 in free roam did not apply the accepted value");
+            enter(0); require(!pending(), "notice remained in the MODS list after successful F9");
+            enter(3); require(!pending() && read<int>(row + 0x68) == desired, "reopened mod did not show the applied value without a notice");
+        }
+        stopRuntimeControl(); stopRuntimePreview();
+        std::cout << "PASS: F9 listener, A-only persistence, preview rollback, accepted-only apply, and exact On/Off mod/list/free-roam round trips with fresh UI bindings.\n";
     } catch (const std::exception& error) {
         stopRuntimeControl();
         std::cerr << error.what() << '\n'; return 1;
