@@ -423,6 +423,11 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* platform) {
         const bool wanted = loadRequested(install);
         startRuntimeControl(api, mod, wanted, {requestedRuntimeLoad, resumeTracking, stopTracking, canStopTracking});
         if (!wanted) {
+            // A stock hot reload may replace an already-Off DLL. Its resident
+            // controls must be available before tracking is started again.
+            const auto* game = api->game_base ? static_cast<const uint8_t*>(api->game_base()) : nullptr;
+            if (runtimeControlEnabled() && game && installJournalNoticeRefresh(api, mod, game))
+                installRuntimePreview();
             log("Load Achievements is OFF; registered the scene and settings without starting tracking or hooks.");
             return 0;
         }
