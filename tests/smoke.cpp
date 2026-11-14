@@ -4,9 +4,12 @@
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <set>
+#include <mutex>
 #include <stdexcept>
 
 namespace {
@@ -18,6 +21,9 @@ std::atomic<void*> installedTile = nullptr;
 std::atomic<void*> installedFocus = nullptr, installedScene = nullptr, installedUpdate = nullptr;
 unsigned inheritedUpdates = 0, nativeHudUpdates = 0;
 std::string capturedPage;
+std::mutex hookMutex;
+std::set<FH3Hook*> activeHooks;
+std::atomic<bool> codeAvailable = true;
 void stockFocus(void*) {}
 void stockUpdate(void*) { ++nativeHudUpdates; }
 void inheritedUpdate(void*) { ++inheritedUpdates; }
@@ -39,7 +45,11 @@ FH3Mod* registerMod(const FH3ModInfo* info) {
 }
 void logLine(FH3Mod*, const char* line) { std::cout << line << std::endl; }
 void* gameBase() { return image.data(); }
-void* waitForCode(uint32_t) { return gameBase(); }
+void* waitForCode(uint32_t timeout) {
+    if (codeAvailable) return gameBase();
+    Sleep(timeout);
+    return nullptr;
+}
 int addSetting(FH3Mod*, const FH3Setting*) { return 1; }
 uint32_t original(const void*, const void*, uint64_t, uint32_t, const void*) { return 42; }
 FH3Hook* hookPointer(FH3Mod*, const char*, void** slot, void* callback, void** next) {
@@ -52,7 +62,11 @@ FH3Hook* hookPointer(FH3Mod*, const char*, void** slot, void* callback, void** n
     installedDetour = callback;
     return reinterpret_cast<FH3Hook*>(1);
 }
-int enable(FH3Mod*, FH3Hook*) { return 1; }
+int enable(FH3Mod*, FH3Hook* hook) {
+    std::lock_guard lock(hookMutex);
+    activeHooks.insert(hook);
+    return 1;
+}
 void stockTile(void*) {}
 FH3Hook* hookFunction(FH3Mod*, const char*, void* target, void* callback, void** next) {
     if (target == image.data() + 0xb26690) return reinterpret_cast<FH3Hook*>(7);
@@ -66,8 +80,13 @@ FH3Hook* hookFunction(FH3Mod*, const char*, void* target, void* callback, void**
     return reinterpret_cast<FH3Hook*>(2);
 }
 int disable(FH3Mod*, FH3Hook* hook) {
+    std::lock_guard lock(hookMutex);
+    activeHooks.erase(hook);
     if (hook == reinterpret_cast<FH3Hook*>(2)) installedTile = nullptr;
     if (hook == reinterpret_cast<FH3Hook*>(1)) installedDetour = nullptr;
+    if (hook == reinterpret_cast<FH3Hook*>(3)) installedFocus = nullptr;
+    if (hook == reinterpret_cast<FH3Hook*>(6)) installedScene = nullptr;
+    if (hook == reinterpret_cast<FH3Hook*>(10)) installedUpdate = nullptr;
     return 1;
 }
 int setFile(FH3Mod*, const char* path, const void* content, size_t length) {
@@ -100,16 +119,40 @@ struct LoadedMod {
     using Shutdown = void (*)();
     HMODULE dll;
     Shutdown shutdown;
+    using Capability = int (*)();
+    Capability canShutdown;
+    bool active = true;
     explicit LoadedMod(const fs::path& path, const FH3ModApi& api) {
-        dll = LoadLibraryW(path.c_str());
+        // The real platform retains old modules and loads a fresh copy per F9.
+        static unsigned generation = 0;
+        const auto copy = fs::path(installPath) / L"fh3-mods" / L".reload" /
+            (L"FH3Achievements." + std::to_wstring(++generation) + L".dll");
+        fs::create_directories(copy.parent_path());
+        fs::copy_file(path, copy);
+        dll = LoadLibraryW(copy.c_str());
         require(dll != nullptr, "DLL failed to load");
         auto init = reinterpret_cast<Init>(GetProcAddress(dll, "fh3mod_init"));
         shutdown = reinterpret_cast<Shutdown>(GetProcAddress(dll, "fh3mod_shutdown"));
+        auto runtime = reinterpret_cast<Capability>(GetProcAddress(dll, "fh3mod_runtime_toggle"));
+        canShutdown = reinterpret_cast<Capability>(GetProcAddress(dll, "fh3mod_can_shutdown"));
+        require(runtime && runtime() == 1 && canShutdown, "runtime Load/F9 exports missing");
         require(init && shutdown && init(&api) == 0, "platform initialization failed");
     }
-    ~LoadedMod() {
+    void stop() {
+        if (!active) return;
+        require(canShutdown() == 1, "journal must be closed before runtime disable");
         shutdown();
-        FreeLibrary(dll);
+        active = false;
+        std::lock_guard lock(hookMutex);
+        require(activeHooks.empty(), "runtime disable left active achievement hooks");
+        const auto file = fs::path(installPath) / L"fh3-mods" / L"FH3Achievements" / L"session.lock";
+        const auto lease = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, 0, nullptr);
+        require(lease != INVALID_HANDLE_VALUE, "runtime disable did not release the worker's journal lock");
+        CloseHandle(lease);
+    }
+    ~LoadedMod() {
+        if (active) shutdown();
+        // Intentionally keep code mapped, just like the platform's F9 loader.
     }
 };
 }
@@ -165,6 +208,18 @@ int wmain(int argc, wchar_t** argv) {
         api.hook_function = hookFunction;
         api.enable_hooks = enable;
         api.disable_hooks = disable;
+        const auto disabled = fixture / L"fh3-mods" / L"platform-disabled.txt";
+        fs::create_directories(disabled.parent_path());
+        std::ofstream(disabled, std::ios::binary) << "\xef\xbb\xbf# Cold-start disabled fixture\r\n  FH3aCHIEVEMENTS.DLL\t\r\nOtherMod.dll\r\n";
+        {
+            LoadedMod off(dll, api);
+            Sleep(400);
+            require(!installedDetour && !installedTile, "cold OFF started tracking or journal hooks");
+            require(!fs::exists(record), "cold OFF wrote achievement progress");
+            require(!capturedPage.empty(), "cold OFF must register its startup scene for later F9 activation");
+            off.stop();
+        }
+        std::ofstream(disabled) << "# Unrelated disabled mod must not affect Achievements\nOtherMod.dll\n";
         std::string firstRun;
         auto** initialHudSlots = reinterpret_cast<void**>(image.data() + 0x4566590);
         initialHudSlots[148] = image.data() + 0x13a19a0;
@@ -195,10 +250,12 @@ int wmain(int argc, wchar_t** argv) {
             require(std::wstring(scenePath)==L"Anthem\\A_AchJournal","journal scene redirect failed");
             void* journal=reinterpret_cast<void*>(0x1234);
             reinterpret_cast<void (*)(void*)>(installedFocus.load())(journal);
+            require(running.canShutdown() == 0, "runtime disable must be refused while the journal is open");
             reinterpret_cast<void (*)(void*)>(installedUpdate.load())(journal);
             reinterpret_cast<void (*)(void*)>(installedUpdate.load())(reinterpret_cast<void*>(0x5678));
             require(inheritedUpdates==1&&nativeHudUpdates==1,"journal/HUD frame updates were not isolated");
             reinterpret_cast<void (*)(void*)>(installedFocus.load())(reinterpret_cast<void*>(0x5678));
+            require(running.canShutdown() == 1, "journal close must allow runtime disable");
             require(capturedPage.find("0 / 135     0 / 3000G") != std::string::npos,
                     "fresh journal did not start at zero");
             require(capturedPage.find("A_Double_HUDSafeFrameHorizontalMax") != std::string::npos &&
@@ -231,7 +288,49 @@ int wmain(int argc, wchar_t** argv) {
                     "Skill Song events did not persist");
             firstRun = contents(record);
             require(firstRun.find("\n32 0 ") == std::string::npos, "five Skill Songs did not unlock");
+            // Queue one live event immediately before Off/F9, without waiting
+            // for the next save scan. Shutdown must persist it exactly once.
+            detour(image.data() + 0x4462668, nullptr, 0, 10, nullptr);
+            reinterpret_cast<void (*)(void*)>(installedFocus.load())(reinterpret_cast<void*>(0x5678));
+            std::ofstream(disabled) << "FH3Achievements.dll\n";
+            running.stop();
+            firstRun = contents(record);
+            require(firstRun.find("\n26 0 1\n") != std::string::npos,
+                    "runtime shutdown lost the last live convoy event");
+            detour(image.data() + 0x4462668, nullptr, 0, 10, nullptr);
+            Sleep(100);
+            require(contents(record) == firstRun, "an old callback changed achievements while OFF");
         }
+        // On/F9 must work without a DLL file change, with the old image still
+        // mapped. Repeated cycles cannot duplicate counters or create hooks.
+        for (int cycle = 0; cycle < 3; ++cycle) {
+            std::ofstream(disabled) << "OtherMod.dll\n";
+            LoadedMod running(dll, api);
+            require(waitFor([] { return installedDetour && installedTile; }), "On/F9 did not restore hooks");
+            Sleep(150);
+            std::ofstream(disabled) << "FH3Achievements.dll\n";
+            running.stop();
+            require(contents(record) == firstRun, "Off/On duplicated or lost achievement progress");
+        }
+        {
+            LoadedMod off(dll, api);
+            Sleep(300);
+            off.stop();
+            require(contents(record) == firstRun, "disabled initialization changed an existing career");
+        }
+        fs::remove(disabled);
+        // F9 may arrive while the game's code is still becoming available.
+        // Shutdown must interrupt that wait rather than exceed the loader's
+        // eight-second shutdown deadline.
+        codeAvailable = false;
+        {
+            LoadedMod waiting(dll, api);
+            Sleep(100);
+            const auto before = GetTickCount64();
+            waiting.stop();
+            require(GetTickCount64() - before < 1500, "shutdown blocked on game-code readiness");
+        }
+        codeAvailable = true;
         {
             LoadedMod running(dll, api);
             require(waitFor([] { return installedDetour.load() != nullptr; }), "reload hook timed out");
@@ -251,7 +350,7 @@ int wmain(int argc, wchar_t** argv) {
                 "the game's commit changed");
         require(readFile(input->commit.parent_path() / L"data" / L"ProfileData", 16 << 20) ==
                 readFile(copied / L"data" / L"ProfileData", 16 << 20), "the game's save changed");
-        std::cout << "PASS: fresh and progressed journal, queued import summary across restart, previous ledger migration, live event, save integrity.\n";
+        std::cout << "PASS: fresh/progressed journal, import summary, ledger migration, live events, save integrity, cold OFF, retained-DLL Off/On cycles, journal guard and shutdown event flush.\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
