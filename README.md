@@ -56,7 +56,8 @@ accepted value, even while a different value is being previewed.
 Close the Achievements journal, then press F9 (or your configured `ReloadKey`)
 to apply the accepted selection. Off stops tracking and pop-ups; On starts them
 again in the same session. Earned achievements and live counters are preserved.
-The bottom pending-change notice clears after a successful F9 apply and returns
+An accepted change keeps its notice in both the mod page and MODS list until F9
+succeeds in free roam. The notice clears after that apply and returns
 when a different value is previewed or another change is accepted.
 
 While Off, only the F9 listener and Load-control UI hooks remain active. Hooks are
