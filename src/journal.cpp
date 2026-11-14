@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "journal.hpp"
+#include "runtime.hpp"
 
 #include <windows.h>
 #include <array>
@@ -284,6 +285,7 @@ void onUpdate(void* page) {
     } else {
         originalUpdate(page);
     }
+    refreshRuntimeNotice(page);
 }
 
 uint8_t* onBuildScene(uint8_t* out) {
@@ -352,17 +354,17 @@ bool installJournal(const FH3ModApi* platform, FH3Mod* handle, const uint8_t* ba
     auto** vtable = reinterpret_cast<void**>(writable + HudVtable);
     // The platform uses the same scene and property hooks for MODS. The hook API
     // chains those shared entry points so normal HUD and MODS navigation stays intact.
-    hooks[0] = api->hook_function(mod, "Achievement property bindings", writable + FindProperty,
+    if (!hooks[0]) hooks[0] = api->hook_function(mod, "Achievement property bindings", writable + FindProperty,
                                   reinterpret_cast<void*>(onProperty), reinterpret_cast<void**>(&originalProperty));
-    hooks[1] = api->hook_function(mod, "Achievement scene path", writable + HudScene,
+    if (!hooks[1]) hooks[1] = api->hook_function(mod, "Achievement scene path", writable + HudScene,
                                   reinterpret_cast<void*>(onBuildScene), reinterpret_cast<void**>(&originalScene));
-    hooks[2] = api->hook_pointer(mod, "Achievement page focus", &vtable[148],
+    if (!hooks[2]) hooks[2] = api->hook_pointer(mod, "Achievement page focus", &vtable[148],
                                  reinterpret_cast<void*>(onFocus), reinterpret_cast<void**>(&originalFocus));
-    hooks[3] = api->hook_pointer(mod, "Achievement page buttons", &vtable[179],
+    if (!hooks[3]) hooks[3] = api->hook_pointer(mod, "Achievement page buttons", &vtable[179],
                                  reinterpret_cast<void*>(onButton), reinterpret_cast<void**>(&originalButton));
-    hooks[4] = api->hook_function(mod, "Pause / Progress / Achievements", writable + PauseTile,
+    if (!hooks[4]) hooks[4] = api->hook_function(mod, "Pause / Progress / Achievements", writable + PauseTile,
                                   reinterpret_cast<void*>(onTile), reinterpret_cast<void**>(&originalTile));
-    hooks[5] = api->hook_pointer(mod, "Achievement page update", &vtable[175],
+    if (!hooks[5]) hooks[5] = api->hook_pointer(mod, "Achievement page update", &vtable[175],
                                  reinterpret_cast<void*>(onUpdate), reinterpret_cast<void**>(&originalUpdate));
     for (auto* hook : hooks) {
         if (!hook || !api->enable_hooks(mod, hook)) {
@@ -379,11 +381,12 @@ void publishJournal(const ProgressList& progress, const Unlocks& unlocks) {
     latestUnlocks = unlocks;
 }
 
-void stopJournal() {
+void stopJournal(bool keepNoticeRefresh) {
     if (!api || !mod) return;
-    for (auto it = hooks.rbegin(); it != hooks.rend(); ++it)
-        if (*it) api->disable_hooks(mod, *it);
-    hooks.fill(nullptr);
+    for (size_t i = hooks.size(); i-- > 0;)
+        if (hooks[i] && !(keepNoticeRefresh && i == 5)) api->disable_hooks(mod, hooks[i]);
+    // Keep tokens for the resident controller: stock platform hooks are toggled
+    // in place, so repeated On never adds a second hook on the same target.
     // FH3 mounts this scene once. Retain its file across Off/On so the next
     // DLL can reopen it without requiring a game restart to remount assets.
 }
