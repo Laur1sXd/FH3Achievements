@@ -15,4 +15,5 @@ bool platformJournalRouteReady(const uint8_t* game);
 void publishJournal(const ProgressList& progress, const Unlocks& unlocks);
 void stopJournal(bool keepNoticeRefresh = false);
 bool journalCanShutdown();
+bool installJournalNoticeRefresh(const FH3ModApi* api, FH3Mod* mod, const uint8_t* game);
 }
