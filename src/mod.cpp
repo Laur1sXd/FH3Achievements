@@ -18,7 +18,7 @@
 namespace {
 using namespace ach;
 constexpr wchar_t Section[] = L"Achievements";
-constexpr char Version[] = "1.0.0";
+constexpr char Version[] = "1.0.1";
 
 const FH3ModApi* api = nullptr;
 FH3Mod* mod = nullptr;
