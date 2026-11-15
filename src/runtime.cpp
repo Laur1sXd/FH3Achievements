@@ -384,3 +384,17 @@ void refreshRuntimeNotice(void* page) {
     }
 }
 }
+
+#ifdef FH3_F9_COMPAT_TEST
+
+extern "C" __declspec(dllexport) int F9CompatReady(){return ach::previewReady.load() && ach::runtimeControlEnabled();}
+extern "C" __declspec(dllexport) int F9CompatAccept(int value){
+ auto* row=ach::loadRow(ach::noticePlatform,ach::owner);if(!row)return 0;
+ ach::preview={row,ach::ownSettingsPage(ach::noticePlatform,ach::owner),ach::read<int>(ach::noticePlatform+0x2362a8),ach::read<int>(row+0x68),ach::read<int>(row+0x6c)};
+ std::memcpy(row+0x68,&value,4);return ach::acceptPreview();
+}
+extern "C" __declspec(dllexport) int F9CompatApplied(){return ach::runtimeLoadState();}
+extern "C" __declspec(dllexport) int F9CompatPending(){auto*r=ach::loadRow(ach::noticePlatform,ach::owner);return !r?-1:ach::read<int>(r+0x68)!=ach::read<int>(r+0x6c);}
+extern "C" __declspec(dllexport) void F9CompatPump(){ach::refreshRuntimeNotice(ach::read<void*>(ach::noticePlatform+0x2362c0));}
+
+#endif
