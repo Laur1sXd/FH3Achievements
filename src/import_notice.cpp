@@ -7,7 +7,9 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace ach {
@@ -33,7 +35,10 @@ std::atomic<bool> waiting = false;
 std::recursive_mutex mutex;
 std::vector<uint8_t*> components;
 ImportSummary pending;
+struct UnlockNotice { std::string title, body; };
+std::deque<UnlockNotice> unlockNotices;
 bool shown = false;
+bool watchingLifetime = false;
 ULONGLONG hudSince = 0, nextCheck = 0;
 
 template<class Function> Function native(uintptr_t rva) {
@@ -46,7 +51,7 @@ uint8_t* onConstruct(uint8_t* component) {
         std::lock_guard lock(mutex);
         components.push_back(result);
     } catch (...) {
-        platform->log(owner, "Could not track the first-run notification HUD.");
+        platform->log(owner, "Could not track the achievement notification HUD.");
     }
     return result;
 }
@@ -94,7 +99,7 @@ void releaseShared(void* control) {
     }
 }
 
-bool showSummary(uint8_t* component, ImportSummary summary) {
+bool showNotice(uint8_t* component, const char* heading, const char* detail) {
     __try {
         void* hud[2]{};
         native<void** (*)(void*, void**)>(AcquireHud)(component + 0x1f8, hud);
@@ -102,12 +107,10 @@ bool showSummary(uint8_t* component, ImportSummary summary) {
             releaseShared(hud[1]);
             return false;
         }
-        char text[96];
-        std::snprintf(text, sizeof text, "%d unlocked from your save - %dG", summary.count, summary.score);
         void *title = nullptr, *body = nullptr, *icon = nullptr, *style = nullptr;
         const auto make = native<void** (*)(void**, const char*)>(MakeDisplayString);
-        make(&title, "ACHIEVEMENTS UNLOCKED");
-        make(&body, text);
+        make(&title, heading);
+        make(&body, detail);
         make(&icon, "Achievement");
         make(&style, stringData(component + 0x1d0));
         // ShowNotification takes ownership of these four native display strings.
@@ -116,38 +119,54 @@ bool showSummary(uint8_t* component, ImportSummary summary) {
         return *reinterpret_cast<void* const*>(component + 0x1f0) != nullptr;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         enabled = false;
-        platform->log(owner, "First-run HUD notification failed and was left pending.");
+        platform->log(owner, "Native achievement HUD notification failed and was left pending.");
         return false;
     }
+}
+
+// Called on FH3's HUD thread. Queueing from the save worker never calls native UI.
+void pumpNotices(ULONGLONG now, bool visible) {
+    if (!enabled || !waiting) return;
+    if (now < nextCheck) return;
+    nextCheck = now + 250;
+    if (!visible) {
+        hudSince = 0;
+        return;
+    }
+    if (!hudSince) {
+        hudSince = now;
+    }
+    if (now - hudSince < 1500) return;
+    auto it = std::ranges::find_if(components, roadDiscoveryReady);
+    if (it == components.end()) return;
+    bool delivered = false;
+    if (pending.count && !shown) {
+        char text[96];
+        std::snprintf(text, sizeof text, "%d unlocked from your save - %dG", pending.count, pending.score);
+        delivered = showNotice(*it, "ACHIEVEMENTS UNLOCKED", text);
+        if (delivered) {
+            shown = true;
+            platform->log(owner, "First-run achievement summary shown on the driving HUD.");
+        }
+    } else if (!unlockNotices.empty()) {
+        const auto& notice = unlockNotices.front();
+        delivered = showNotice(*it, notice.title.c_str(), notice.body.c_str());
+        if (delivered) {
+            unlockNotices.pop_front();
+            platform->log(owner, "Achievement unlock shown on the native driving HUD.");
+        }
+    }
+    waiting = (pending.count && !shown) || !unlockNotices.empty();
+    if (delivered) nextCheck = now + 1500;
 }
 
 void onUpdate(void* controller) {
     originalUpdate(controller);
     if (!enabled || !waiting) return;
     std::lock_guard lock(mutex);
-    if (!pending.count || shown) return;
-    const auto now = GetTickCount64();
-    if (now < nextCheck) return;
-    nextCheck = now + 250;
     DWORD foreground = 0;
     GetWindowThreadProcessId(GetForegroundWindow(), &foreground);
-    if (foreground != GetCurrentProcessId() || !drivingHudVisible()) {
-        hudSince = 0;
-        return;
-    }
-    if (!hudSince) {
-        hudSince = now;
-        platform->log(owner, "Driving HUD is active for the queued achievement summary.");
-    }
-    if (now - hudSince < 1500) return;
-    auto it = std::ranges::find_if(components, roadDiscoveryReady);
-    if (it == components.end()) return;
-    nextCheck = now + 1500;
-    if (showSummary(*it, pending)) {
-        shown = true;
-        waiting = false;
-        platform->log(owner, "First-run achievement summary shown on the driving HUD.");
-    }
+    pumpNotices(GetTickCount64(), foreground == GetCurrentProcessId() && drivingHudVisible());
 }
 }
 
@@ -164,13 +183,15 @@ bool installImportNotice(const FH3ModApi* api, FH3Mod* mod, const uint8_t* base)
     auto* writable = const_cast<uint8_t*>(base);
     {
         std::lock_guard lock(mutex);
-        components.clear();
+        // Resident Off keeps constructor/destructor watches so re-enabling
+        // can use an existing HUD without keeping stale component pointers.
+        if (!watchingLifetime) components.clear();
     }
     if (!hooks[0]) hooks[0] = api->hook_function(mod, "Achievement HUD notification destructor", writable + ComponentDtor,
                                   reinterpret_cast<void*>(onDestruct), reinterpret_cast<void**>(&originalDtor));
     if (!hooks[1]) hooks[1] = api->hook_function(mod, "Achievement HUD notification constructor", writable + ComponentCtor,
                                   reinterpret_cast<void*>(onConstruct), reinterpret_cast<void**>(&originalCtor));
-    if (!hooks[2]) hooks[2] = api->hook_function(mod, "First-run achievement driving HUD update", writable + DrivingHudUpdate,
+    if (!hooks[2]) hooks[2] = api->hook_function(mod, "Achievement driving HUD update", writable + DrivingHudUpdate,
                                   reinterpret_cast<void*>(onUpdate), reinterpret_cast<void**>(&originalUpdate));
     for (auto* hook : hooks) {
         if (!hook || !api->enable_hooks(mod, hook)) {
@@ -178,26 +199,66 @@ bool installImportNotice(const FH3ModApi* api, FH3Mod* mod, const uint8_t* base)
             return false;
         }
     }
+    watchingLifetime = true;
     return true;
 }
 
-void stopImportNotice() {
+void stopImportNotice(bool keepLifetimeWatch) {
     enabled = false;
     if (!platform || !owner) return;
-    for (auto it = hooks.rbegin(); it != hooks.rend(); ++it)
-        if (*it) platform->disable_hooks(owner, *it);
+    for (size_t i = hooks.size(); i-- > 0;)
+        if (hooks[i] && !(keepLifetimeWatch && watchingLifetime && i < 2))
+            platform->disable_hooks(owner, hooks[i]);
     std::lock_guard lock(mutex);
-    components.clear();
+    unlockNotices.clear();
+    waiting = pending.count && !shown;
+    hudSince = nextCheck = 0;
+    if (!keepLifetimeWatch) {
+        watchingLifetime = false;
+        components.clear();
+    }
 }
 
-void enableImportNotice(bool value) { enabled = value; }
+void enableImportNotice(bool value) {
+    std::lock_guard lock(mutex);
+    enabled = value;
+    if (!value) unlockNotices.clear();
+    waiting = (pending.count && !shown) || !unlockNotices.empty();
+    hudSince = nextCheck = 0;
+}
 
 void queueImportNotice(ImportSummary summary) {
     std::lock_guard lock(mutex);
     pending = summary;
+    unlockNotices.clear(); // Profile changes cannot show the previous career's unlocks.
     shown = false;
     hudSince = nextCheck = 0;
     waiting = summary.count != 0;
+}
+
+void queueAchievementNotices(std::span<const Achievement* const> achievements) {
+    if (achievements.empty()) return;
+    std::deque<UnlockNotice> batch;
+    if (achievements.size() >= 2) {
+        int score = 0;
+        for (const auto* achievement : achievements) score += achievement->gamerscore;
+        batch.push_back({"ACHIEVEMENTS UNLOCKED", std::to_string(achievements.size()) +
+            " achievements - " + std::to_string(score) + "G"});
+    } else {
+        for (const auto* achievement : achievements) {
+            const auto length = WideCharToMultiByte(CP_UTF8, 0, achievement->title, -1, nullptr, 0, nullptr, nullptr);
+            if (length <= 1) continue;
+            std::string name(length, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, achievement->title, -1, name.data(), length, nullptr, nullptr);
+            name.pop_back();
+            batch.push_back({"ACHIEVEMENT UNLOCKED", name + " - " + std::to_string(achievement->gamerscore) + "G"});
+        }
+    }
+    std::lock_guard lock(mutex);
+    if (!enabled) return;
+    for (auto& notice : batch) unlockNotices.push_back(std::move(notice));
+    if (!waiting && !unlockNotices.empty()) hudSince = nextCheck = 0;
+    waiting = (pending.count && !shown) || !unlockNotices.empty();
 }
 
 bool importNoticeShown() {
