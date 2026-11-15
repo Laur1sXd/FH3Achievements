@@ -1,5 +1,10 @@
 # FH3 Achievements
 
+**v1.0.1 — Native HUD edition.** New unlocks use FH3's native driving HUD.
+The original v1.0.0 edition uses the custom Xbox-style overlay. Install one
+version at a time; both use `fh3-mods/FH3Achievements.dll` and keep the same
+achievement records and settings.
+
 An offline achievement mod for the Xbox One build of Forza Horizon 3 running in Azimuth. It lists all 135 Xbox One achievements and their original 3,000G. The mod reads 64 achievements from saves and implements seven additional live event rules. Each entry shows its requirement, points, and local progress where supported.
 
 ## Install
