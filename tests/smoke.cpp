@@ -380,8 +380,9 @@ int wmain(int argc, wchar_t** argv) {
                 require(resident.apply() == 1 && resident.state() == 0, "stock-platform Off/F9 failed");
                 {
                     std::lock_guard lock(hookMutex);
-                    require(activeHooks == std::set<FH3Hook*>{reinterpret_cast<FH3Hook*>(10)},
-                            "Off must retain only the native notice-refresh hook");
+                    require(activeHooks == std::set<FH3Hook*>{reinterpret_cast<FH3Hook*>(8),
+                                reinterpret_cast<FH3Hook*>(9), reinterpret_cast<FH3Hook*>(10)},
+                            "Off must retain only notice refresh and safe HUD lifetime watches");
                 }
                 require(!installedDetour && !installedTile, "Off left tracking or the journal tile active");
                 require(contents(record) == ledger, "Off changed earned achievements");
