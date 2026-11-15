@@ -17,6 +17,15 @@ The mod checks the latest complete Azimuth FH3 save revision about every two sec
 
 The first time the mod reads a career with completed achievements, it shows the imported count and Gamerscore at the bottom of the driving HUD. The notice waits until free roam and follows the **Achievement pop-ups** setting. Profiles from earlier builds also get this one-time summary when they update.
 
+New unlocks use FH3's own driving HUD notification and its Achievement trophy
+icon. A single unlock reads **ACHIEVEMENT UNLOCKED**, followed by the achievement
+name and points, such as **Welcome to Your Horizon - 10G**. Two or more unlocked
+in the same detection pass share one **ACHIEVEMENTS UNLOCKED** notification with
+their count and total Gamerscore. Separate batches queue in order and wait while
+the native notification component is busy. Notices wait for free roam with the
+game in focus and respect **Achievement pop-ups**. These are local mod unlocks;
+they do not create Xbox account achievements or Windows Xbox system toasts.
+
 Entries show **Online only** when they require a service unavailable in Azimuth. **Untracked** means this version has no supported trigger for that achievement. This includes several specific car, stunt and race conditions. Live-only counters, such as Skill Song participation and convoy race finishes, start when the mod begins receiving those events. Barn Find restoration is credited when the restored car is claimed. All Gamerscore is local to the mod.
 
 Check **fh3-mods\platform.log** for the native page hook, live event hook, and save sync status. To uninstall, close Azimuth and remove **FH3Achievements.dll**. You can keep the **FH3Achievements** data folder to preserve the journal.
@@ -31,7 +40,7 @@ Run the smoke test with your own game executable and a progressed Azimuth **play
 
     .\build\smoke.exe .\build\FH3Achievements.dll '<game exe>' '<player-1 folder>' '<new scratch directory>'
 
-The harness checks the original tile hook target, page generation with fresh and progressed saves, the queued summary across reloads, previous ledger migration, a simulated live event, and save integrity. It writes the two generated XAML documents to the scratch directory for inspection.
+The harness checks the original tile hook target, page generation with fresh and progressed saves, the queued summary across reloads, previous ledger migration, a simulated live event, and save integrity. It writes the two generated XAML documents to the scratch directory for inspection. Run **build\native-notices-test.exe** for the native HUD ABI fixture: wording, trophy token, two-or-more grouping, queue order, first-run acknowledgement, busy/retry gates, pop-up settings, profile changes and Off/On component lifetime checks. Run **build\runtime-test.exe** with a new scratch-directory argument for the Load/Accept/F9 controls.
 
 ## Credits
 
