@@ -3,9 +3,9 @@
 #include "events.hpp"
 #include "import_notice.hpp"
 #include "journal.hpp"
-#include "overlay.hpp"
 #include "runtime.hpp"
 
+#include <windows.h>
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -149,7 +149,7 @@ struct WorkerState {
         record = next;
     }
 
-    void refresh(const uint8_t* game, Overlay& overlay, bool eventsEnabled) {
+    void refresh(const uint8_t* game, bool eventsEnabled) {
         mergeLiveProgress(pending, takeEvents());
         auto revision = latestRevision(saves);
         if (!revision) {
@@ -160,7 +160,6 @@ struct WorkerState {
                 publishJournal(progress, record.unlocks);
                 currentCommit.clear();
                 profile.clear();
-                overlay.reset();
                 queueImportNotice({});
                 synced = false;
                 pending.fill(0);
@@ -224,7 +223,7 @@ struct WorkerState {
         const auto timestamp = (std::max<int64_t>)(1, std::time(nullptr));
         std::vector<const Achievement*> unlockedNow;
         std::vector<const Achievement*> popupUnlocks;
-        int gained = 0, popupScore = 0;
+        int gained = 0;
         for (const auto& item : Catalog) {
             if (item.online || next.unlocks[item.id] || !nextProgress[item.id].complete()) continue;
             next.unlocks[item.id] = timestamp;
@@ -232,7 +231,6 @@ struct WorkerState {
             gained += item.gamerscore;
             if (!inImport[item.id]) {
                 popupUnlocks.push_back(&item);
-                popupScore += item.gamerscore;
             }
         }
         if (writable && !persist(recordPath, next))
@@ -240,16 +238,9 @@ struct WorkerState {
         pending.fill(0);
 
         if (changedProfile) {
-            overlay.reset();
             queueImportNotice(next.import);
         }
-        if (popups && !popupUnlocks.empty()) {
-            if (popupUnlocks.size() == 1)
-                overlay.toast(popupUnlocks.front()->title, L"+" + std::to_wstring(popupScore) + L" G");
-            else
-                overlay.toast(std::to_wstring(popupUnlocks.size()) + L" achievements earned",
-                              L"+" + std::to_wstring(popupScore) + L" G");
-        }
+        if (popups && !popupUnlocks.empty()) queueAchievementNotices(popupUnlocks);
         if (!synced || changedProfile || !unlockedNow.empty()) {
             std::ostringstream line;
             line << "Read save revision " << std::hex << revision->number << std::dec
@@ -271,7 +262,7 @@ private:
     static int64_t readLevel(const ProgressList& next) { return next[49].current; }
 };
 
-void run(HINSTANCE instance) {
+void run() {
     try {
         const uint8_t* game = nullptr;
         for (int i = 0; i < 120 && !stopping; ++i) {
@@ -301,15 +292,14 @@ void run(HINSTANCE instance) {
         if (stopping) return;
         if (codeReady) {
             eventsEnabled = installEventReader(api, mod, game);
-            log(installImportNotice(api, mod, game) ? "First-run achievement HUD ready to wait for free roam." :
-                                                    "First-run achievement HUD notification unavailable.");
+            log(installImportNotice(api, mod, game) ? "Native achievement HUD ready for imports and new unlocks." :
+                                                    "Native achievement HUD notifications unavailable.");
         }
         log(eventsEnabled ? "Watching FH3 achievement events locally." :
                             "Live events unavailable. Save-backed achievements are active.");
         WorkerState state;
         if (eventsEnabled) addLiveProgress(state.progress, {});
         publishJournal(state.progress, state.record.unlocks);
-        Overlay overlay(instance);
         bool journalLinked = false;
         if (codeReady) log("Waiting for Mod Platform's MODS menu before linking Achievements.");
         else log("Native achievement page route unavailable.");
@@ -331,7 +321,7 @@ void run(HINSTANCE instance) {
                 readAfter = now + 2000;
                 try {
                     state.acknowledgeImportNotice();
-                    state.refresh(game, overlay, eventsEnabled);
+                    state.refresh(game, eventsEnabled);
                     state.lastError.clear();
                 } catch (const std::exception& error) {
                     if (state.lastError != error.what()) {
@@ -340,13 +330,12 @@ void run(HINSTANCE instance) {
                     }
                 }
             }
-            overlay.update(popups);
             Sleep(32);
         }
         // Stop accepting events before the final drain so an F9 disable cannot
         // lose live counters collected since the last two-second save scan.
         if (eventsEnabled) stopEventReader(api, mod);
-        state.refresh(game, overlay, eventsEnabled);
+        state.refresh(game, eventsEnabled);
         state.acknowledgeImportNotice();
     } catch (const std::exception& error) {
         log(std::string("Achievement worker stopped: ") + error.what());
@@ -355,12 +344,9 @@ void run(HINSTANCE instance) {
 
 bool resumeTracking() {
     if (worker.joinable()) return false;
-    HMODULE instance{};
-    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                            reinterpret_cast<LPCWSTR>(&stopping), &instance)) return false;
     stopping = false;
     enableImportNotice(popups);
-    worker = std::thread(run, instance);
+    worker = std::thread(run);
     return true;
 }
 
@@ -369,9 +355,9 @@ void stopTracking() {
     stopping = true;
     if (worker.joinable()) worker.join();
     stopJournal(runtimeControlEnabled());
-    stopImportNotice();
+    stopImportNotice(runtimeControlEnabled());
     if (api && mod) stopEventReader(api, mod);
-    if (api && mod) log("Achievements stopped; worker, tracking hooks and notification window are off.");
+    if (api && mod) log("Achievements stopped; worker, tracking hooks and native notifications are off.");
 }
 bool canStopTracking() {
     if (journalCanShutdown()) return true;
