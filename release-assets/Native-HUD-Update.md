@@ -1,4 +1,4 @@
-# Native achievement HUD update
+# FH3 Achievements 1.0.1 — Native HUD edition
 
 New unlocks now use FH3's own driving HUD notification, including its
 `Achievement` trophy icon and existing notification template.
@@ -21,5 +21,8 @@ native ABI fixture and `runtime-test.exe <new scratch directory>` for Accept/F9.
 The save smoke harness also checks backfill, ledger migration, live counters,
 save integrity and resident/full shutdown.
 
-The local install/source ZIPs remain named **1.0.0**. The already-published
-GitHub v1.0.0 release assets are separate and have not been replaced by this update.
+Download **FH3-Achievements-1.0.1.zip** to install or
+**FH3-Achievements-1.0.1-Source.zip** for the source. The original v1.0.0 packages
+remain available separately. Install one version at a time: both versions use
+`fh3-mods/FH3Achievements.dll` and share existing records and settings.
+The already-published GitHub v1.0.0 release assets remain unchanged.
