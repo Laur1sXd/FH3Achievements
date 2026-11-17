@@ -41,7 +41,7 @@ void stub(uintptr_t rva, const void* target) {
 }
 
 FH3Mod* registerMod(const FH3ModInfo* info) {
-    if (!info || !info->check_updates || !info->github_repo ||
+    if (!info || info->offline_only || !info->check_updates || !info->github_repo ||
         std::strcmp(info->github_repo, "Laur1sXd/FH3Achievements") != 0) return nullptr;
     return reinterpret_cast<FH3Mod*>(1);
 }
@@ -306,6 +306,25 @@ int wmain(int argc, wchar_t** argv) {
                     "Skill Song events did not persist");
             firstRun = contents(record);
             require(firstRun.find("\n32 0 ") == std::string::npos, "five Skill Songs did not unlock");
+            // Model the game's Auction House completion events, not an auction
+            // listing or a normal Autoshow purchase. Persist and reload both.
+            struct Field { uint64_t data; uint32_t size, reserved; };
+            uint32_t auctionCar = 123, auctionPrice = 1000;
+            std::array<Field, 7> auction{};
+            auction[3] = {reinterpret_cast<uint64_t>(&auctionCar), 4, 0};
+            auction[4] = {reinterpret_cast<uint64_t>(&auctionPrice), 4, 0};
+            for (int n = 0; n < 5; ++n)
+                require(detour(image.data() + 0x44623c8, nullptr, 0, 7, auction.data()) == 42,
+                        "auction sale event changed the native result");
+            require(detour(image.data() + 0x4462390, nullptr, 0, 7, auction.data()) == 42,
+                    "auction claim event changed the native result");
+            require(waitFor([&] {
+                const auto ledger = contents(record);
+                return ledger.find("\n35 ") != std::string::npos && ledger.find("\n36 ") != std::string::npos;
+            }), "online Auction House unlocks were not persisted");
+            firstRun = contents(record);
+            require(firstRun.find("\n35 0 ") == std::string::npos && firstRun.find("\n36 0 ") == std::string::npos,
+                    "online Auction House entries remained locked");
             // Queue one live event immediately before Off/F9, without waiting
             // for the next save scan. Shutdown must persist it exactly once.
             detour(image.data() + 0x4462668, nullptr, 0, 10, nullptr);
