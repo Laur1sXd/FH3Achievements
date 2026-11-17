@@ -400,6 +400,8 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* platform) {
     if (!mod) return 1;
     try {
         const fs::path install(api->azimuth_dir);
+        if (hasFh3mpInstallation(install))
+            log("FH3MP installation detected. Local achievement tracking supports offline and FH3MP play.");
         root = install / L"fh3-mods" / L"FH3Achievements";
         settings = root / L"Settings.ini";
         saves = install / L"data" / L"titles" / L"4CE1DFAB" / L"saves" / L"player-1";
