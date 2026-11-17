@@ -4,6 +4,7 @@
 #include "import_notice.hpp"
 #include "journal.hpp"
 #include "runtime.hpp"
+#include "pr_reader.hpp"
 
 #include <windows.h>
 #include <algorithm>
@@ -62,7 +63,7 @@ bool loadRequested(const fs::path& install) {
 struct Record {
     uint64_t revision = 0;
     Unlocks unlocks{};
-    LiveProgress live{};
+    EventBatch live{};
     bool needsImportNotice = true;
     ImportSummary import{};
 };
@@ -70,14 +71,14 @@ struct Record {
 Record loadRecord(const fs::path& path) {
     Record result;
     if (!fs::exists(path)) return result;
-    const auto bytes = readFile(path, 32 * 1024);
+    const auto bytes = readFile(path, 64 * 1024);
     std::istringstream in(std::string(bytes.begin(), bytes.end()));
     std::string kind;
-    if (!(in >> kind >> std::hex >> result.revision >> std::dec) || (kind != "FH3ACH2" && kind != "FH3ACH3"))
+    if (!(in >> kind >> std::hex >> result.revision >> std::dec) || (kind != "FH3ACH2" && kind != "FH3ACH3" && kind != "FH3ACH4"))
         throw std::runtime_error("invalid local achievement record");
     std::string line;
     std::getline(in, line);
-    if (kind == "FH3ACH3") {
+    if (kind == "FH3ACH3" || kind == "FH3ACH4") {
         std::istringstream header(line);
         auto& [count, score] = result.import;
         std::string tail;
@@ -92,6 +93,14 @@ Record loadRecord(const fs::path& path) {
     while (std::getline(in, line)) {
         std::istringstream entry(line);
         std::string tail;
+        if (kind == "FH3ACH4" && line.starts_with("S ")) {
+            char prefix;
+            uint32_t key;
+            if (!(entry >> prefix >> id >> key) || (entry >> tail) || !validEvidence(id,key) ||
+                !result.live.unique[id].insert(key).second)
+                throw std::runtime_error("invalid evidence in local achievement record");
+            continue;
+        }
         if (!(entry >> id >> date >> current) || (entry >> tail))
             throw std::runtime_error("invalid entry in local achievement record");
         if (id < 1 || id >= static_cast<int>(result.unlocks.size()) ||
@@ -100,7 +109,7 @@ Record loadRecord(const fs::path& path) {
             throw std::runtime_error("invalid entry in local achievement record");
         seen[id] = true;
         result.unlocks[id] = date;
-        result.live[id] = current;
+        result.live.counters[id] = current;
     }
     if (!in.eof()) throw std::runtime_error("could not read the local achievement record");
     return result;
@@ -123,11 +132,12 @@ bool replaceFile(const fs::path& path, const std::string& text) {
 
 bool persist(const fs::path& path, const Record& record) {
     std::ostringstream out;
-    out << "FH3ACH3 " << std::hex << record.revision << std::dec << ' '
+    out << "FH3ACH4 " << std::hex << record.revision << std::dec << ' '
         << record.import.count << ' ' << record.import.score << '\n';
     for (const auto& item : Catalog) {
-        const auto stamp = record.unlocks[item.id], current = record.live[item.id];
+        const auto stamp = record.unlocks[item.id], current = record.live.counters[item.id];
         if (stamp || current) out << item.id << ' ' << stamp << ' ' << current << '\n';
+        for (auto key : record.live.unique[item.id]) out << "S " << item.id << ' ' << key << '\n';
     }
     return replaceFile(path, out.str());
 }
@@ -139,7 +149,7 @@ struct WorkerState {
     std::wstring profile;
     bool synced = false;
     std::string lastError;
-    LiveProgress pending{};
+    EventBatch pending{};
 
     void acknowledgeImportNotice() {
         if (!record.import.count || preserveLedger || !importNoticeShown()) return;
@@ -150,25 +160,25 @@ struct WorkerState {
         record = next;
     }
 
-    void refresh(const uint8_t* game, bool eventsEnabled) {
-        mergeLiveProgress(pending, takeEvents());
+    void refresh(const uint8_t* game, bool eventsEnabled, bool prEnabled) {
+        mergeEventBatch(pending, takeEventBatch());
         auto revision = latestRevision(saves);
         if (!revision) {
             if (!currentCommit.empty()) {
                 progress = initialProgress();
-                if (eventsEnabled) addLiveProgress(progress, {});
+                if (eventsEnabled) addEventProgress(progress, {},prEnabled);
                 record = {};
                 publishJournal(progress, record.unlocks);
                 currentCommit.clear();
                 profile.clear();
                 queueImportNotice({});
                 synced = false;
-                pending.fill(0);
+                pending = {};
             }
             return;
         }
         const bool saveChanged = revision->commit != currentCommit;
-        const bool eventsChanged = std::ranges::any_of(pending, [](int64_t n) { return n != 0; });
+        const bool eventsChanged = !pending.empty();
         if (!saveChanged && !eventsChanged) return;
 
         // Read and evaluate the whole committed revision before changing the journal.
@@ -206,8 +216,11 @@ struct WorkerState {
             next = record;
             writable = !preserveLedger;
         }
-        if (synced && changedProfile) pending.fill(0);
-        mergeLiveProgress(next.live, pending);
+        if (synced && changedProfile) pending = {};
+        if (changedProfile)
+            for (int id : {132,133,134,135})
+                next.live.counters[id] = (std::max)(next.live.counters[id],nextProgress[id].current);
+        mergeEventBatch(next.live, pending);
         const bool summarizeImport = next.needsImportNotice && popups && writable;
         std::array<bool, std::size(Catalog) + 1> inImport{};
         if (summarizeImport) {
@@ -219,7 +232,7 @@ struct WorkerState {
             }
         }
         next.needsImportNotice = false;
-        if (eventsEnabled) addLiveProgress(nextProgress, next.live);
+        if (eventsEnabled) addEventProgress(nextProgress, next.live,prEnabled);
         next.revision = olderRevision ? (std::max)(next.revision, revision->number) : revision->number;
         const auto timestamp = (std::max<int64_t>)(1, std::time(nullptr));
         std::vector<const Achievement*> unlockedNow;
@@ -236,7 +249,7 @@ struct WorkerState {
         }
         if (writable && !persist(recordPath, next))
             throw std::runtime_error("cannot write the local achievement record");
-        pending.fill(0);
+        pending = {};
 
         if (changedProfile) {
             queueImportNotice(next.import);
@@ -285,7 +298,7 @@ void run() {
             log("Cannot open the achievement journal for writing. Another session may be using it.");
             return;
         }
-        bool eventsEnabled = false;
+        bool eventsEnabled = false, prEnabled = false;
         bool codeReady = false;
         for (int waited = 0; !stopping && api->wait_for_code && waited < 8000; waited += 250) {
             if (api->wait_for_code(250) == game) { codeReady = true; break; }
@@ -293,13 +306,15 @@ void run() {
         if (stopping) return;
         if (codeReady) {
             eventsEnabled = installEventReader(api, mod, game);
+            prEnabled = eventsEnabled && installPrReader(api,mod,game);
+            log(prEnabled ? "Native PR stunt results ready (map, entity, current car, class and mass)." : "Native PR stunt result reader unavailable.");
             log(installImportNotice(api, mod, game) ? "Native achievement HUD ready for imports and new unlocks." :
                                                     "Native achievement HUD notifications unavailable.");
         }
         log(eventsEnabled ? "Watching FH3 achievement events locally." :
                             "Live events unavailable. Save-backed achievements are active.");
         WorkerState state;
-        if (eventsEnabled) addLiveProgress(state.progress, {});
+        if (eventsEnabled) addEventProgress(state.progress, {},prEnabled);
         publishJournal(state.progress, state.record.unlocks);
         bool journalLinked = false;
         if (codeReady) log("Waiting for Mod Platform's MODS menu before linking Achievements.");
@@ -322,7 +337,7 @@ void run() {
                 readAfter = now + 2000;
                 try {
                     state.acknowledgeImportNotice();
-                    state.refresh(game, eventsEnabled);
+                    state.refresh(game, eventsEnabled,prEnabled);
                     state.lastError.clear();
                 } catch (const std::exception& error) {
                     if (state.lastError != error.what()) {
@@ -335,8 +350,9 @@ void run() {
         }
         // Stop accepting events before the final drain so an F9 disable cannot
         // lose live counters collected since the last two-second save scan.
+        if (prEnabled) stopPrReader(api,mod);
         if (eventsEnabled) stopEventReader(api, mod);
-        state.refresh(game, eventsEnabled);
+        state.refresh(game, eventsEnabled,prEnabled);
         state.acknowledgeImportNotice();
     } catch (const std::exception& error) {
         log(std::string("Achievement worker stopped: ") + error.what());
@@ -357,7 +373,7 @@ void stopTracking() {
     if (worker.joinable()) worker.join();
     stopJournal(runtimeControlEnabled());
     stopImportNotice(runtimeControlEnabled());
-    if (api && mod) stopEventReader(api, mod);
+    if (api && mod) { stopPrReader(api,mod); stopEventReader(api, mod); }
     if (api && mod) log("Achievements stopped; worker, tracking hooks and native notifications are off.");
 }
 bool canStopTracking() {
