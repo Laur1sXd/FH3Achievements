@@ -135,8 +135,9 @@ std::string list(const std::string& name, int width, int height, const char* row
 }
 
 std::string card(const Achievement& entry, const Progress& p, int64_t stamp, int section, size_t index) {
-    const auto status = stamp ? openedDate(stamp) : entry.online ? std::string("ONLINE ONLY") :
-                        p.target ? std::to_string(p.current) + " / " + std::to_string(p.target) : "UNTRACKED";
+    const auto status = stamp ? openedDate(stamp) : p.target ?
+                        std::to_string(p.current) + " / " + std::to_string(p.target) :
+                        entry.online ? std::string("ONLINE ONLY") : "UNTRACKED";
     std::string x = "<Button x:Name=\"AchCard_" + std::to_string(section) + "_" + std::to_string(index) +
                     "\" Template=\"{StaticResource AchPlain}\"><Grid Height=\"110\" Margin=\"4,0,12,0\">"
                     "<Grid.ColumnDefinitions><ColumnDefinition Width=\"62\" /><ColumnDefinition />"
