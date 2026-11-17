@@ -1,6 +1,6 @@
 # FH3 Achievements
 
-An offline achievement mod for the Xbox One build of Forza Horizon 3 running in Azimuth. It lists all 135 Xbox One achievements and their original 3,000G. The mod reads 64 achievements from saves and implements seven additional live event rules. Each entry shows its requirement, points, and local progress where supported.
+A local achievement mod for the Xbox One build of Forza Horizon 3 running in Azimuth. It lists all 135 Xbox One achievements and their original 3,000G. The mod reads 66 achievements from saves and implements nine additional live event rules. Each entry shows its requirement, points, and local progress where supported.
 
 ## Install
 
@@ -26,7 +26,33 @@ the native notification component is busy. Notices wait for free roam with the
 game in focus and respect **Achievement pop-ups**. These are local mod unlocks;
 they do not create Xbox account achievements or Windows Xbox system toasts.
 
-Entries show **Online only** when they require a service unavailable in Azimuth. **Untracked** means this version has no supported trigger for that achievement. This includes several specific car, stunt and race conditions. Live-only counters, such as Skill Song participation and convoy race finishes, start when the mod begins receiving those events. Barn Find restoration is credited when the restored car is claimed. All Gamerscore is local to the mod.
+The **Online** section now tracks these FH3MP-compatible achievements:
+
+| Achievement | Tracking |
+| --- | --- |
+| Welcome to Horizon Online | Five completed Adventure/Free Roam events, using the saved online-finish counter. |
+| Online Adventurer | 25 completed Adventure/Free Roam events, using the same counter. |
+| Auction Fever | The native Auction House purchase/claim event. |
+| 5 Star Seller - A+++++ | Five native successful-sale/collection events. |
+
+Saved online finishes are recognized when the career is loaded. Auction tracking
+starts with this version; total Auction House transactions are not used to guess
+how many were sales. Live counters and unlocks persist per profile, using the
+existing settings, native notifications, two-or-more grouping and F9 controls.
+The mod is no longer marked offline-only in its platform registration.
+
+FH3MP's current [documented services](https://github.com/Charelene/FH3MP#readme)
+include Free Roam, Free Roam races, Adventure and the Auction House. Remaining
+online entries still show **Online only**: Co-op, community Blueprints, Airstrip
+class completion, expansion-specific online goals, Infected/Hoonigan, Forza Hub
+and the old community Forzathon goals have no verified tracking path in this
+version. They are not unlocked simply because the game is online.
+
+**Untracked** means this version has no supported trigger for an achievement.
+Live-only counters, such as Skill Song participation, convoy race finishes and
+auction sales, start when the mod begins receiving those events. Barn Find
+restoration is credited when the restored car is claimed. All Gamerscore remains
+local to the mod; this does not submit achievements to Xbox or FH3MP's servers.
 
 Check **fh3-mods\platform.log** for the native page hook, live event hook, and save sync status. To uninstall, close Azimuth and remove **FH3Achievements.dll**. You can keep the **FH3Achievements** data folder to preserve the journal.
 
@@ -41,6 +67,11 @@ Run the smoke test with your own game executable and a progressed Azimuth **play
     .\build\smoke.exe .\build\FH3Achievements.dll '<game exe>' '<player-1 folder>' '<new scratch directory>'
 
 The harness checks the original tile hook target, page generation with fresh and progressed saves, the queued summary across reloads, previous ledger migration, a simulated live event, and save integrity. It writes the two generated XAML documents to the scratch directory for inspection. Run **build\native-notices-test.exe** for the native HUD ABI fixture: wording, trophy token, two-or-more grouping, queue order, first-run acknowledgement, busy/retry gates, pop-up settings, profile changes and Off/On component lifetime checks. Run **build\runtime-test.exe** with a new scratch-directory argument for the Load/Accept/F9 controls.
+
+Run **build\online-test.exe** to check saved online-finish thresholds, Auction
+House event payload validation, persistent-counter merging, journal status,
+locked unsupported entries and forwarding while Off. The smoke harness also
+records auction unlocks and reloads them without duplication or ledger rejection.
 
 ## Credits
 
