@@ -33,4 +33,6 @@ if ($SmokeTest) {
     if ($LASTEXITCODE) { throw 'Runtime controller test build failed.' }
     & $cpp @common "$PSScriptRoot\tests\native_notices.cpp" -luser32 -o "$OutDir\native-notices-test.exe"
     if ($LASTEXITCODE) { throw 'Native HUD test build failed.' }
+    & $cpp @common "$PSScriptRoot\tests\online.cpp" "$src\rules.cpp" "$src\save.cpp" "$src\journal_xaml.cpp" $obj -lbcrypt -luser32 -o "$OutDir\online-test.exe"
+    if ($LASTEXITCODE) { throw 'Online achievement test build failed.' }
 }
