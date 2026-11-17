@@ -11,8 +11,13 @@
   still share a notification.
 - Removed the mod's offline-only registration flag. The mod reads game saves and
   events locally and forwards the native events unchanged.
-- Remaining online achievements stay locked until their requirements and
-  triggers are verified. Installing FH3MP does not automatically unlock them.
+- Added local tracking paths for the remaining online and DLC goals. DLC race
+  progress validates both map and route; car-specific PR goals use the native
+  result, stunt identifier, car, class and mass. Distinct stunts, cars and
+  classes persist across reloads.
+- Recognizes Encore's FH3MP shim installation without relying on the platform's
+  FH2MP detector. The journal keeps its normal progress and unlocked status.
+  Installing FH3MP does not unlock goals or add missing server modes/services.
 - Existing records/settings and A/Accept/F9 behavior are preserved. No platform,
   Encore, cloud-save or game-save changes are included.
 
