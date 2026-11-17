@@ -65,6 +65,16 @@ public:
     ~Career() { sqlite3_close(db); }
     Career(const Career&) = delete;
     Career& operator=(const Career&) = delete;
+    int64_t total(const char* query) const {
+        if (!db) return 0;
+        sqlite3_stmt* stmt = nullptr;
+        int64_t result = 0;
+        if (sqlite3_prepare_v2(db,query,-1,&stmt,nullptr) == SQLITE_OK &&
+            sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt,0) == SQLITE_INTEGER)
+            result = std::clamp<int64_t>(sqlite3_column_int64(stmt,0),0,100000000);
+        sqlite3_finalize(stmt);
+        return result;
+    }
     std::set<int> ids(const char* query) const {
         std::set<int> result;
         if (!db) return result;
@@ -155,6 +165,8 @@ ProgressList evaluate(const Snapshot& save) {
     // Do not count races entered, podiums or wins as completed online events.
     stat(37, "MiscStats/OnlineEventsFinished", 5);
     stat(38, "MiscStats/OnlineEventsFinished", 25);
+    put(43, career.ids("SELECT CarId FROM Career_Garage WHERE PricePaid >= 1000000").size());
+    put(55, matching(std::array{660,661}, career.ids("SELECT ManufacturerId FROM Career_PurchasedParts")), 2);
     put(41, career.ids("SELECT CarOrdinal FROM PhotoCaptures").size(), 300);
     put(46, matching(HorizonEditionCars, garage));
     stat(48, "Main/Level", 20);
@@ -173,8 +185,11 @@ ProgressList evaluate(const Snapshot& save) {
     stat(68, "Mountain/Stars", 5);
     stat(69, "Mountain/Stars", 90);
     stat(70, "Mountain/Stars", 160);
+    stat(71, "Mountain/KingOfTheMountainEventsCompleted", 26);
+    stat(74, "Mountain/ChampionshipsCompleted", 27);
     put(72, restored.contains(2558));
     stat(73, "Mountain/ChampionshipsCompleted");
+    put(75,career.ids("SELECT r.RaceId FROM Career_RaceResults r JOIN CareerRaces c ON c.CareerRaceId=r.RaceId WHERE c.TrackId=1212 AND r.Place=1 AND r.TimesCompleted>0").size());
     stat(76, "Mountain/BonusBoardsSmashed", 25);
     stat(77, "Mountain/BeautySpotsDiscovered", 5);
     stat(80, "Mountain/RoadsDiscovered", 50);
@@ -188,6 +203,8 @@ ProgressList evaluate(const Snapshot& save) {
     put(97, level(Wheels) >= 2);
     put(98, level(Wheels) >= 4);
     put(99, level(Wheels) >= 6);
+    put(96,save.stat("OpusIsland/Stars")>=177);
+    put(100,career.ids("SELECT r.RaceId FROM Career_RaceResults r JOIN CareerRaces c ON c.CareerRaceId=r.RaceId WHERE c.TrackId=1242 AND r.Place=1 AND r.TimesCompleted>0").size());
     stat(101, "OpusIsland/ExhibitionEventsCompleted", 28);
     put(102, hotPr.threeStars, std::size(IslandStunts));
     stat(103, "OpusIsland/Stars", 177);
@@ -199,6 +216,19 @@ ProgressList evaluate(const Snapshot& save) {
     stat(120, "OpusIsland/ChampionshipsCompleted");
     stat(121, "OpusIsland/ChampionshipsCompleted", 28);
     put(126, career.ids("SELECT CarId FROM Career_Garage WHERE CarId = 2730 AND HighestSkillScore >= 300000").size());
+    // RaceResults records completions, unlike Main/NumRaces and RacesEntered.
+    // Preserve exact combined alternatives documented by Forza Support.
+    const auto finishes = career.total("SELECT SUM(TimesCompleted) FROM Career_RaceResults WHERE TimesCompleted > 0");
+    int64_t ultimate = 0;
+    for (const auto* key : {"Main/NumUltimateWreckages", "Main/NumUltimateJTurns", "Main/NumUltimateSpeeds",
+             "Main/NumUltimateEDrifts", "Main/NumUltimateDrafts", "Main/NumUltimateNearMisses",
+             "Main/NumUltimateAirs", "Main/NumUltimatePasses", "Main/NumUltimateOneEighties",
+             "Main/NumUltimateTwoWheels", "Main/NumUltimateDrifts", "Main/NumUltimateBurnouts"})
+        ultimate += bounded(save.stat(key),2500);
+    put(132,finishes+ultimate,2500);
+    put(133,finishes,2000);
+    put(134,finishes,1500);
+    put(135,finishes+bounded(save.stat("Mountain/SnowmenSmashed"),1000),1000);
     return result;
 }
 
