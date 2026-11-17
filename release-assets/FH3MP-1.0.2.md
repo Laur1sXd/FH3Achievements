@@ -18,6 +18,12 @@
 - Recognizes Encore's FH3MP shim installation without relying on the platform's
   FH2MP detector. The journal keeps its normal progress and unlocked status.
   Installing FH3MP does not unlock goals or add missing server modes/services.
+- Fixed zero achievements when offline and Encore saves coexist. The tracker
+  selects the active player reported by FH3, reads only that career's save
+  revisions, and restores its separate achievement record when switching
+  profiles. Missing active saves do not inherit another career's progress.
+- Fixed level achievement backfill when the cached save level lags behind
+  earned XP. Level 20 and 150 progress now also uses the original XP curve.
 - Existing records/settings and A/Accept/F9 behavior are preserved. No platform,
   Encore, cloud-save or game-save changes are included.
 
