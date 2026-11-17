@@ -26,7 +26,7 @@ bool accepting = false;
 struct Rule { int id; int target; bool increment; };
 constexpr Rule Rules[] = {
     {7, 1, false}, {9, 1, false}, {19, 4, false}, {26, 10, true},
-    {27, 160935, false}, {32, 5, true}, {78, 1, false},
+    {27, 160935, false}, {32, 5, true}, {35, 5, true}, {36, 1, false}, {78, 1, false},
 };
 
 template<typename T>
@@ -62,6 +62,14 @@ uint32_t eventWrite(const void* descriptor, const void* provider, uint64_t handl
             break;
         case 0x4462358: // CarPurchased (separate from CarAddedToGarage and auction purchases).
             if (count == 13) observe(9, 1);
+            break;
+        case 0x4462390: // CarPurchasedInAuction: two typed DWORD event fields after the common header.
+            if (count == 7 && value<uint32_t>(fields, count, 3) && value<uint32_t>(fields, count, 4))
+                observe(36, 1);
+            break;
+        case 0x44623c8: // CarSoldInAuction: successful sale/collection, not listing a car.
+            if (count == 7 && value<uint32_t>(fields, count, 3) && value<uint32_t>(fields, count, 4))
+                observe(35, 1, true);
             break;
         case 0x4463ba0: // RadioStationUnlocked: station name then cumulative UnlockCount.
             if (count == 7) observe(19, value<int32_t>(fields, count, 4).value_or(0));
