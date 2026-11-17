@@ -9,7 +9,7 @@ A local achievement mod for the Xbox One build of Forza Horizon 3 running in Azi
 3. Extract the install ZIP into the folder containing azimuth.exe. The DLL goes in **fh3-mods\FH3Achievements.dll**.
 4. Start FH3. Open **Pause → Progress → Achievements** from the original Progress tile.
 
-The in-game page follows the FH2 mod's two-column layout. Browse the sections on the left and press **A** to move into the achievement list on the right. Use **B** to go back and **LB** or **RB** to switch sections. Pop-ups can be turned off in **Home → MODS → Installed mods → FH3 Achievements**.
+The in-game page follows the FH2 mod's two-column layout. Browse the sections on the left and press **A** to move into the achievement list on the right. Use **B** to go back and **LB** or **RB** to switch sections. Pop-ups can be turned off in **Home → MODS → Installed mods → Achievements**.
 
 ## Save progress
 
