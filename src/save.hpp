@@ -31,7 +31,9 @@ struct Revision {
     uint64_t number;
 };
 
-std::optional<Revision> latestRevision(const fs::path& saves, std::optional<uint64_t> before = {});
+std::optional<std::wstring> activeProfile(const uint8_t* game);
+std::optional<Revision> latestRevision(const fs::path& saves, std::optional<uint64_t> before = {},
+                                       std::wstring_view profile = {});
 Snapshot readSave(const uint8_t* game, const Revision& revision);
 Snapshot parseSave(Bytes plaintext);
 std::vector<uint8_t> readFile(const fs::path& file, size_t maxSize);
