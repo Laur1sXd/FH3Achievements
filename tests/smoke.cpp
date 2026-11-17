@@ -179,7 +179,7 @@ struct LoadedMod {
 
 int wmain(int argc, wchar_t** argv) {
     try {
-        require(argc == 5 || argc == 6, "usage: smoke <mod dll> <game exe> <existing player-1 save root> <new test folder> [mediaplatform|mediaoverride]");
+        require(argc >= 5 && argc <= 7, "usage: smoke <mod dll> <game exe> <existing player-1 save root> <new test folder> [mediaplatform|mediaoverride] [User_hex profile]");
         const auto dll = fs::absolute(argv[1]);
         const auto fixture = fs::absolute(argv[4]);
         require(!fs::exists(fixture), "test folder must be new");
@@ -187,8 +187,31 @@ int wmain(int argc, wchar_t** argv) {
         image = readGameImage(argv[2]);
         stub(0x1689f60,reinterpret_cast<void*>(transition));
         stub(0x14a1b70,reinterpret_cast<void*>(inheritedUpdate));
-        const auto input = latestRevision(argv[3]);
+        const auto input = latestRevision(argv[3], {}, argc == 7 ? std::wstring_view(argv[6]) : std::wstring_view{});
         require(input.has_value(), "progressed save fixture missing");
+        // Model the local player's native identity, independently of what
+        // profiles happen to be present on disk.
+        std::array<uint8_t,0x100> services{}, servicesVtable{};
+        std::array<uint8_t,0xa00> player{};
+        std::array<uint8_t,0x150> playerVtable{};
+        std::array<uintptr_t,2> list{};
+        const auto base = reinterpret_cast<uintptr_t>(image.data());
+        const auto put = [](void* address, auto value) { std::memcpy(address,&value,sizeof value); };
+        put(image.data()+0x4d6fc00,reinterpret_cast<uintptr_t>(services.data()));
+        put(services.data(),reinterpret_cast<uintptr_t>(servicesVtable.data()));
+        put(servicesVtable.data()+0x48,base+0x3c17e0);
+        put(services.data()+0x34,uint8_t{1});
+        put(services.data()+0x38,reinterpret_cast<uintptr_t>(list.data()));
+        put(services.data()+0x40,size_t{1});
+        std::array<uintptr_t,3> playerEntry{};
+        list[0]=reinterpret_cast<uintptr_t>(playerEntry.data());
+        playerEntry[2]=reinterpret_cast<uintptr_t>(player.data());
+        put(player.data(),reinterpret_cast<uintptr_t>(playerVtable.data()));
+        put(playerVtable.data()+0x48,base+0x3c56d0);
+        put(playerVtable.data()+0xe8,base+0x3c2490);
+        const auto playerXuid=std::stoull(input->profile.substr(5),nullptr,16);
+        put(player.data()+0x900,static_cast<uint64_t>(playerXuid));
+        require(activeProfile(image.data()).has_value(),"native active-profile fixture failed");
         const auto empty = initialProgress();
         require(std::ranges::none_of(empty, [](const auto& p) { return p.current || p.complete(); }),
                 "fresh career has earned progress");
@@ -208,7 +231,10 @@ int wmain(int argc, wchar_t** argv) {
         const auto copied = copyRoot / input->profile / L"revisions" / input->commit.parent_path().filename();
         const auto stateDir = fixture / L"fh3-mods" / L"FH3Achievements";
         const auto record = stateDir / (input->profile + L".txt");
-        const std::wstring overlay = argc == 6 ? argv[5] : L"mediaoverride";
+        constexpr auto OtherProfile=L"User_123456789abcd";
+        const auto otherCopied=copyRoot/OtherProfile/L"revisions"/input->commit.parent_path().filename();
+        const auto otherRecord=stateDir/(std::wstring(OtherProfile)+L".txt");
+        const std::wstring overlay = argc >= 6 ? argv[5] : L"mediaoverride";
         require(overlay == L"mediaoverride" || overlay == L"mediaplatform", "unknown overlay mode");
         const auto stateflow = fixture / overlay / L"stateflow";
         fs::create_directories(stateflow);
@@ -284,6 +310,12 @@ int wmain(int argc, wchar_t** argv) {
             std::ofstream(fixture / L"fresh.xaml", std::ios::binary) << capturedPage;
             Sleep(2200);
             require(!fs::exists(record), "fresh slot got an achievement ledger");
+            // A populated inactive career must not be imported while the
+            // active player's first committed save is still missing.
+            fs::create_directories(otherCopied.parent_path());
+            fs::copy(input->commit.parent_path(),otherCopied,fs::copy_options::recursive);
+            Sleep(2300);
+            require(!fs::exists(record)&&!fs::exists(otherRecord),"inactive save was used for an unsaved active player");
             fs::create_directories(copied.parent_path());
             fs::copy(input->commit.parent_path(), copied, fs::copy_options::recursive);
             require(waitFor([&] { return fs::exists(record); }), "backfill did not write the local record");
@@ -447,7 +479,38 @@ int wmain(int argc, wchar_t** argv) {
             noHotReload.stop();
         }
         fs::remove(disabled);
-        std::cout << "PASS: save integrity/backfill, ledger migration, live events, shutdown flush, journal guard, retained-DLL reload, stock-platform same-DLL Off/On with no duplicate hooks and HotReload=0.\n";
+        std::ofstream(config)<<"[dev]\nHotReload=1\n";
+        {
+            LoadedMod switching(dll,api);
+            require(waitFor([]{return installedTile.load()!=nullptr;}),"profile-switch journal hook missing");
+            auto openTile=reinterpret_cast<void (*)(void*)>(installedTile.load());
+            require(waitFor([&]{openTile(nullptr);return capturedPage.find("UNLOCKED 20")!=std::string::npos;}),"active career was not restored");
+            const auto activePage=capturedPage, activeLedger=contents(record);
+            put(player.data()+0x900,uint64_t{0x123456789abcd});
+            require(waitFor([&]{return fs::exists(otherRecord);}),"second active career was not imported");
+            require(contents(record)==activeLedger,"switching careers changed the inactive ledger");
+            const auto secondLedger=contents(otherRecord);
+            require(secondLedger.find("\n35 ")==std::string::npos&&secondLedger.find("\n36 ")==std::string::npos&&
+                    secondLedger.find("\nS 122 2728\n")==std::string::npos,"live-only evidence leaked between careers");
+            put(player.data()+0x900,uint64_t{0x123456789abce});
+            require(waitFor([&]{openTile(nullptr);return capturedPage.find("0 / 135     0 / 3000G")!=std::string::npos;}),
+                    "missing third career displayed another player's achievements");
+            put(player.data()+0x900,static_cast<uint64_t>(playerXuid));
+            require(waitFor([&]{openTile(nullptr);return capturedPage==activePage;}),"returning to the first career lost its progress");
+            const auto corrupt=copyRoot/L"User_123456789abce"/L"revisions"/L"0000000000000001";
+            fs::create_directories(corrupt/L"data");
+            std::ofstream(corrupt/L"commit")<<"incomplete fixture manifest";
+            std::ofstream(corrupt/L"data"/L"ProfileData")<<"incomplete fixture save";
+            put(player.data()+0x900,uint64_t{0x123456789abce});
+            require(waitFor([&]{openTile(nullptr);return capturedPage.find("0 / 135     0 / 3000G")!=std::string::npos;}),
+                    "unreadable active save retained another player's achievements");
+            put(player.data()+0x900,static_cast<uint64_t>(playerXuid));
+            require(waitFor([&]{openTile(nullptr);return capturedPage==activePage;}),"failed save retry damaged the original journal");
+            require(contents(record)==activeLedger&&contents(otherRecord)==secondLedger,"profile switching changed earned records");
+            reinterpret_cast<void (*)(void*)>(installedFocus.load())(reinterpret_cast<void*>(0x5678));
+            switching.stop();
+        }
+        std::cout << "PASS: multiple saves, active-profile switching and isolation, missing-save guard, save integrity/backfill, ledger migration, live events, shutdown flush, journal guard and F9 lifecycle.\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
