@@ -284,17 +284,58 @@ std::vector<uint8_t> readFile(const fs::path& file, size_t maxSize) {
     return bytes;
 }
 
-std::optional<Revision> latestRevision(const fs::path& saves, std::optional<uint64_t> before) {
+std::optional<std::wstring> activeProfile(const uint8_t* game) {
+    if (!game) return {};
+    const auto memory = [](uintptr_t address, auto& value) {
+        SIZE_T bytes = 0;
+        return address && ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address),
+                                            &value, sizeof value, &bytes) && bytes == sizeof value;
+    };
+    const auto pointer = [&](uintptr_t address) {
+        uintptr_t value = 0;
+        return memory(address, value) ? value : 0;
+    };
+    const auto base = reinterpret_cast<uintptr_t>(game);
+    const auto services = pointer(base + 0x4d6fc00);
+    if (!services || pointer(pointer(services) + 0x48) != base + 0x3c17e0) return {};
+    uint8_t mode = 0;
+    size_t count = 0;
+    if (!memory(services + 0x34, mode) || mode > 1 || !memory(services + 0x40, count) ||
+        count < (mode ? 1u : 2u) || count > 16) return {};
+    auto entry = pointer(pointer(services + 0x38));
+    if (!mode) entry = pointer(entry);
+    const auto player = pointer(entry + 0x10);
+    const auto vtable = pointer(player);
+    if (!player || pointer(vtable + 0x48) != base + 0x3c56d0 ||
+        pointer(vtable + 0xe8) != base + 0x3c2490) return {};
+    // Local player's identity getter at 3c56d0 delegates to 22a6270 on
+    // this+8, returning the uint64 XUID at +900. Never infer it from the
+    // newest save, an installed shim, or a launcher identity file.
+    uint64_t xuid = 0;
+    if (!memory(player + 0x900, xuid) || !xuid || xuid == UINT64_MAX) return {};
+    std::wostringstream name;
+    name << L"User_" << std::hex << xuid;
+    return name.str();
+}
+
+std::optional<Revision> latestRevision(const fs::path& saves, std::optional<uint64_t> before,
+                                       std::wstring_view profile) {
     // Azimuth's single-player slot. Match profile containers only, never thumbnails.
+    const auto validName = [](std::wstring_view name) {
+        return name.starts_with(L"User_") && name.size() > 5 && name.size() <= 37 &&
+               name.find_first_not_of(L"0123456789abcdefABCDEF", 5) == std::wstring_view::npos;
+    };
+    if (!profile.empty() && !validName(profile)) throw std::runtime_error("invalid FH3 profile selector");
     std::optional<Revision> result;
     if (!fs::is_directory(saves)) return result;
     for (const auto& container : fs::directory_iterator(saves)) {
         const auto name = container.path().filename().wstring();
-        if (!name.starts_with(L"User_") || name.size() <= 5 || name.size() > 37 ||
-            name.find_first_not_of(L"0123456789abcdefABCDEF", 5) != std::wstring::npos) continue;
+        if (!validName(name)) continue;
+        if (!profile.empty() && CompareStringOrdinal(name.data(), static_cast<int>(name.size()),
+            profile.data(), static_cast<int>(profile.size()), TRUE) != CSTR_EQUAL) continue;
         const auto revisions = container.path() / L"revisions";
         if (!container.is_directory() || !fs::is_directory(revisions)) continue;
-        // Refuse ambiguous roots rather than mixing unlocks between two profiles.
+        // Without a known active player, callers must explicitly resolve ambiguity.
         std::optional<Revision> newest;
         for (const auto& item : fs::directory_iterator(revisions)) {
             const auto id = item.path().filename().string();
