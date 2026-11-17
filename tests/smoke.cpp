@@ -82,7 +82,9 @@ int enable(FH3Mod*, FH3Hook* hook) {
     return 1;
 }
 void stockTile(void*) {}
+void stockScore(void*,float,float) {}
 FH3Hook* hookFunction(FH3Mod*, const char*, void* target, void* callback, void** next) {
+    if (target == image.data() + 0x4949d0) { *next=reinterpret_cast<void*>(stockScore); return remember(11,callback); }
     if (target == image.data() + 0xb26690) return remember(7, callback);
     if (target == image.data() + 0xadb350) return remember(8, callback);
     if (target == image.data() + 0xadc940) return remember(9, callback);
@@ -200,7 +202,7 @@ int wmain(int argc, wchar_t** argv) {
         }
         require(importedCount > 0, "fixture must be a progressed save");
         std::ostringstream expectedHeader;
-        expectedHeader << "FH3ACH3 " << std::hex << input->number << std::dec << ' '
+        expectedHeader << "FH3ACH4 " << std::hex << input->number << std::dec << ' '
                        << importedCount << ' ' << importedScore << '\n';
         const auto copyRoot = fixture / L"data" / L"titles" / L"4CE1DFAB" / L"saves" / L"player-1";
         const auto copied = copyRoot / input->profile / L"revisions" / input->commit.parent_path().filename();
@@ -325,6 +327,13 @@ int wmain(int argc, wchar_t** argv) {
             firstRun = contents(record);
             require(firstRun.find("\n35 0 ") == std::string::npos && firstRun.find("\n36 0 ") == std::string::npos,
                     "online Auction House entries remained locked");
+            // Distinct-car evidence must survive the same-DLL F9 cycles and a full reload.
+            std::array<Field,16> championship{};
+            uint32_t hoonigan = 2728;
+            championship[9] = {reinterpret_cast<uint64_t>(&hoonigan),4,0};
+            detour(image.data()+0x4462470,nullptr,0,16,championship.data());
+            require(waitFor([&] { return contents(record).find("\nS 122 2728\n") != std::string::npos; }),
+                    "Hoonigan unique-car evidence was not persisted");
             // Queue one live event immediately before Off/F9, without waiting
             // for the next save scan. Shutdown must persist it exactly once.
             detour(image.data() + 0x4462668, nullptr, 0, 10, nullptr);
@@ -376,13 +385,17 @@ int wmain(int argc, wchar_t** argv) {
         }
         // An existing 1.0.0 ledger gets the new notice once. Its live-only
         // Skill Song unlock stays in the journal and out of the save-import count.
-        std::ofstream(record, std::ios::binary) << "FH3ACH2 " << std::hex << input->number
-                                               << firstRun.substr(firstRun.find('\n'));
+        std::istringstream rows(firstRun.substr(firstRun.find('\n') + 1));
+        std::string legacyRows, row;
+        while (std::getline(rows,row)) if (!row.starts_with("S ")) legacyRows += row + "\n";
+        const auto migrated = firstRun.substr(0,firstRun.find('\n') + 1) + legacyRows;
+        std::ofstream(record, std::ios::binary) << "FH3ACH2 " << std::hex << input->number << '\n' << legacyRows;
         {
             LoadedMod running(dll, api);
-            require(waitFor([&] { return contents(record) == firstRun; }),
+            require(waitFor([&] { return contents(record) == migrated; }),
                     "migrating the previous ledger changed unlocks or the import summary");
         }
+        std::ofstream(record,std::ios::binary) << firstRun;
         require(readFile(input->commit, 65536) == readFile(copied / L"commit", 65536),
                 "the game's commit changed");
         require(readFile(input->commit.parent_path() / L"data" / L"ProfileData", 16 << 20) ==
