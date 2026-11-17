@@ -20,6 +20,17 @@ The in-game page follows the FH2 mod's two-column layout. Browse the sections on
 
 The mod checks the latest complete Azimuth FH3 save revision about every two seconds. It authenticates the save and reads the career data in memory. A fresh career starts at **0G**. A progressed career gets credit for supported goals already recorded in its save. Existing records and new unlocks are kept in **fh3-mods\FH3Achievements\User_*.txt**, separate from the game save.
 
+Multiple saves can remain in the same **player-1** folder. The mod reads the
+game's active local-player identity and selects only that career's revisions.
+Offline and Encore profiles keep separate achievements, counters and unlock
+dates. Switching careers restores the matching journal. A missing active save
+starts at zero rather than importing a different player's progress.
+
+Driver-level achievements also use saved XP: the cached `Main/Level` field can
+lag behind the level shown in FH3. The original XP curve is 20,000 XP per level
+through both level goals. A career with 395,385 XP therefore gets level 20
+credit even if its cached level still says 5.
+
 The first time the mod reads a career with completed achievements, it shows the imported count and Gamerscore at the bottom of the driving HUD. The notice waits until free roam and follows the **Achievement pop-ups** setting. Profiles from earlier builds also get this one-time summary when they update.
 
 New unlocks use FH3's own driving HUD notification and its Achievement trophy
@@ -75,7 +86,14 @@ Use PowerShell and an x64 [llvm-mingw](https://github.com/mstorsjo/llvm-mingw/re
 
 Run the smoke test with your own game executable and a progressed Azimuth **player-1** save folder. Give it a new, writable scratch directory.
 
-    .\build\smoke.exe .\build\FH3Achievements.dll '<game exe>' '<player-1 folder>' '<new scratch directory>'
+    .\build\smoke.exe .\build\FH3Achievements.dll '<game exe>' '<player-1 folder>' '<new scratch directory>' mediaoverride User_9000000000000
+
+When several profiles exist, give the smoke harness the profile to use as its
+save fixture. Run **build\save-profiles-test.exe** for active-player memory
+guards, multiple-profile selection, case-insensitive identity matching and
+revision fallback within the selected career. The smoke harness also switches
+between two populated profiles and an unsaved third player, checking journal
+restoration and preventing live achievement evidence from crossing careers.
 
 The harness checks the original tile hook target, page generation with fresh and progressed saves, the queued summary across reloads, previous ledger migration, a simulated live event, and save integrity. It writes the two generated XAML documents to the scratch directory for inspection. Run **build\native-notices-test.exe** for the native HUD ABI fixture: wording, trophy token, two-or-more grouping, queue order, first-run acknowledgement, busy/retry gates, pop-up settings, profile changes and Off/On component lifetime checks. Run **build\runtime-test.exe** with a new scratch-directory argument for the Load/Accept/F9 controls.
 
