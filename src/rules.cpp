@@ -151,6 +151,10 @@ ProgressList evaluate(const Snapshot& save) {
     stat(31, "CompareStats/RoadsDiscovered", 488);
     put(33, perks.contains(45) || perks.contains(61) || perks.contains(77));
     put(34, matching(PermanentPerks, perks), std::size(PermanentPerks));
+    // The game persists finishes across Online Adventure and Free Roam here.
+    // Do not count races entered, podiums or wins as completed online events.
+    stat(37, "MiscStats/OnlineEventsFinished", 5);
+    stat(38, "MiscStats/OnlineEventsFinished", 25);
     put(41, career.ids("SELECT CarOrdinal FROM PhotoCaptures").size(), 300);
     put(46, matching(HorizonEditionCars, garage));
     stat(48, "Main/Level", 20);
