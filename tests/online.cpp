@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "../src/events.cpp"
 #include "journal.hpp"
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -31,11 +32,42 @@ std::string cardText(const std::string& page, const char* title) {
     require(begin != std::string::npos, "online achievement missing from journal");
     return page.substr(begin, page.find("</Button>", begin) - begin);
 }
+
+void checkInstallation() {
+    const auto root = fs::temp_directory_path() / ("FH3Achievements-online-" +
+        std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
+    require(fs::create_directory(root), "cannot create isolated FH3MP fixture");
+    struct Cleanup {
+        fs::path root;
+        ~Cleanup() { std::error_code error; fs::remove_all(root, error); }
+    } cleanup{root};
+    const auto touch = [&](const fs::path& name) {
+        std::ofstream file(root / name);
+        require(bool(file), "cannot create FH3MP fixture file");
+    };
+    require(!hasFh3mpInstallation(root), "empty install was detected as FH3MP");
+    touch("bcrypt.dll");
+    require(!hasFh3mpInstallation(root), "generic bcrypt proxy was detected as FH3MP");
+    touch("fh3mp-shim.ini");
+    require(!hasFh3mpInstallation(root), "incomplete FH3MP install was accepted");
+    touch("fh3mp-cloud.exe");
+    require(hasFh3mpInstallation(root), "Encore's FH3MP shim install was missed");
+    fs::remove(root / "fh3mp-shim.ini");
+    require(!hasFh3mpInstallation(root), "removed FH3MP shim was cached as installed");
+    fs::create_directory(root / "fh3-mods");
+    touch("fh3-mods/FH2MP.dll");
+    require(!hasFh3mpInstallation(root), "FH2MP was mistaken for FH3MP");
+    touch("fh3-mods/FH3MP.dll");
+    require(hasFh3mpInstallation(root), "FH3MP mod DLL was missed");
 }
 
-int main() {
+}
+
+int main(int argc, char** argv) {
     using namespace ach;
     try {
+        checkInstallation();
+        if (argc > 1) require(hasFh3mpInstallation(fs::path(argv[1])), "installed FH3MP was not detected");
         // Saved completed events, not races entered/won, provide online backfill.
         Snapshot save;
         save.profile["MiscStats/OnlineRacesEntered"] = 100;
@@ -106,6 +138,8 @@ int main() {
                 require(!progress[entry.id].target && !progress[entry.id].complete(),
                         "an unverified online achievement became earnable");
         const auto page = journalXaml(progress, {});
+        require(page.find("CONNECT TO UNLOCK") == std::string::npos,
+                "an extra offline notice changed the normal journal status");
         for (const char* title : {"Auction Fever", "5 Star Seller - A+++++", "Welcome to Horizon Online", "Online Adventurer"}) {
             const auto card = cardText(page, title);
             require(card.find("ONLINE ONLY") == std::string::npos && card.find("UNTRACKED") == std::string::npos,
@@ -119,6 +153,6 @@ int main() {
         changes = takeEvents();
         require(disabled == 1 && !changes[35] && !changes[36] && forwarded == 15,
                 "Off accepted auction events or failed to forward the game's calls");
-        std::cout << "PASS: online finish backfill, 5/25 thresholds, auction claims/sales, typed payload guards, bounded counters, journal status, unverified locks and Off forwarding.\n";
+        std::cout << "PASS: FH3MP installation detection, normal journal status, online finish backfill, auction payload guards and Off forwarding.\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
