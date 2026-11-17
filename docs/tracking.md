@@ -43,6 +43,22 @@ bests alone cannot recover the car used in a past attempt.
 
 ## Online availability
 
+Encore FH3MP 0.1.1 is detected by its `bcrypt.dll`, `fh3mp-shim.ini` and
+`fh3mp-cloud.exe` installation files together, without reading credentials. A
+`fh3-mods/FH3MP.dll` installation is also recognized. Installation is logged
+separately from online status. This avoids the platform 1.4.2 installation
+detector, which requires `FH2MP.dll`. No shared loader changes or new
+achievement-unlock gates are introduced. The journal retains numeric progress
+and earned dates, without an extra connection notice. Native online completion
+events remain required for online-mode achievements; a multiplayer lobby is
+not required merely to use services such as the Auction House.
+
+Xbox's achievement service can queue eligible offline updates and post them
+after reconnection, even when the title is no longer running
+([Microsoft API documentation](https://learn.microsoft.com/en-us/dotnet/api/microsoft.xbox.services.achievements.achievementservice?view=xboxlive-dotnet-2017.11.20171204.01)).
+This mod's local journal and HUD do not synchronize with that service; local
+offline unlocks continue to appear without waiting for a network connection.
+
 A local rule is enabled for every online achievement. This does not implement
 missing FH3MP modes, restore Microsoft's retired Forza Hub app, or submit Xbox
 account achievements. A rule waits for its original completion event when its
