@@ -18,7 +18,7 @@
 namespace {
 using namespace ach;
 constexpr wchar_t Section[] = L"Achievements";
-constexpr char Version[] = "1.0.1";
+constexpr char Version[] = "1.0.2";
 
 const FH3ModApi* api = nullptr;
 FH3Mod* mod = nullptr;
@@ -95,7 +95,8 @@ Record loadRecord(const fs::path& path) {
         if (!(entry >> id >> date >> current) || (entry >> tail))
             throw std::runtime_error("invalid entry in local achievement record");
         if (id < 1 || id >= static_cast<int>(result.unlocks.size()) ||
-            date < 0 || current < 0 || current > 160935 || seen[id] || Catalog[id - 1].online)
+            date < 0 || current < 0 || current > 160935 || seen[id] ||
+            (Catalog[id - 1].online && !onlineTrackingSupported(id)))
             throw std::runtime_error("invalid entry in local achievement record");
         seen[id] = true;
         result.unlocks[id] = date;
@@ -211,7 +212,7 @@ struct WorkerState {
         std::array<bool, std::size(Catalog) + 1> inImport{};
         if (summarizeImport) {
             for (const auto& item : Catalog) {
-                if (item.online || !nextProgress[item.id].complete()) continue;
+                if (!nextProgress[item.id].complete()) continue;
                 inImport[item.id] = true;
                 ++next.import.count;
                 next.import.score += item.gamerscore;
@@ -225,7 +226,7 @@ struct WorkerState {
         std::vector<const Achievement*> popupUnlocks;
         int gained = 0;
         for (const auto& item : Catalog) {
-            if (item.online || next.unlocks[item.id] || !nextProgress[item.id].complete()) continue;
+            if (next.unlocks[item.id] || !nextProgress[item.id].complete()) continue;
             next.unlocks[item.id] = timestamp;
             unlockedNow.push_back(&item);
             gained += item.gamerscore;
@@ -378,7 +379,7 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* platform) {
     info.check_updates = 1;
     info.platform_version = "1.2.1";
     info.description = "Local Xbox One achievements. Open Pause > Progress > Achievements.";
-    info.offline_only = 1;
+    info.offline_only = 0; // Read-only local tracking is also valid in FH3MP sessions.
     mod = api->register_mod(&info);
     if (!mod) return 1;
     try {
