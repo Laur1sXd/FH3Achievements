@@ -76,6 +76,29 @@ skill alternatives as they occur.
 
 ## Persistence and verification
 
+Multiple `User_*` careers can coexist under `player-1`. The active local player
+is resolved from FH3 1.0.125.0's player services (`4d6fc00`), with bounded memory
+reads and method-layout checks. Identity getter `3c56d0` delegates to `22a6270`
+on `this+8`, reading the XUID at player `+900`. This was inspected read-only in
+the loaded offline career. Save selection matches that XUID, including hex case,
+and never picks a career based on save timestamps, largest revision number,
+the installed FH3MP shim or a stale launcher identity file.
+
+Both normal reads and older-revision fallback stay inside the selected profile.
+Unknown player identities or missing active saves do not borrow another
+career's records. A profile switch loads its own `User_*.txt` record, retaining
+the other careers' earned dates and evidence. Event batches spanning an identity
+change are discarded because they cannot safely be attributed to either user.
+The fixtures cover two populated careers, an unsaved third player and returning
+to the original career without losing its live evidence.
+
+The level 20 and 150 goals take the greater of the saved level and the level
+proved by `Main/XP`. The supported game's `PlayerXPLevels.xml` uses 20,000 XP per
+level through both goals, so the thresholds are 380,000 and 2,980,000 XP. An
+empty career remains at zero progress, and XP arithmetic is bounded. The loaded
+offline save had 395,385 XP and the HUD displayed level 20 while its cached
+`Main/Level` was still 5; this mismatch is covered by a regression fixture.
+
 FH3ACH4 adds `S achievementId stableKey` evidence rows to the per-profile local
 record. Versions 2 and 3 migrate without changing earned timestamps. Writes are
 atomic, bounds checked, and independent of game saves. F9 stops both native
