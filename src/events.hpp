@@ -13,6 +13,7 @@ struct EventBatch {
     bool empty() const;
 };
 bool installEventReader(const FH3ModApi* api, FH3Mod* mod, const uint8_t* base);
+bool hasFh3mpInstallation(const fs::path& install);
 void stopEventReader(const FH3ModApi* api, FH3Mod* mod);
 LiveProgress takeEvents();
 EventBatch takeEventBatch();
