@@ -2,6 +2,11 @@
 
 A local achievement mod for the Xbox One build of Forza Horizon 3 running in Azimuth. It lists all 135 Xbox One achievements and their original 3,000G. All 135 entries now have local tracking paths when the native event and PR readers are active. Save data supplies full or partial backfill for 77 goals; live-only conditions are recorded as you play. Each entry shows its requirement, points, and progress.
 
+Encore's FH3MP shim installation is recognized without relying on the platform's
+older FH2MP detector. The journal keeps its normal progress and unlocked status
+in offline and FH3MP play. Installed multiplayer files do not mean you have
+completed an online requirement.
+
 ## Install
 
 1. Close Azimuth.
@@ -74,8 +79,9 @@ Run the smoke test with your own game executable and a progressed Azimuth **play
 
 The harness checks the original tile hook target, page generation with fresh and progressed saves, the queued summary across reloads, previous ledger migration, a simulated live event, and save integrity. It writes the two generated XAML documents to the scratch directory for inspection. Run **build\native-notices-test.exe** for the native HUD ABI fixture: wording, trophy token, two-or-more grouping, queue order, first-run acknowledgement, busy/retry gates, pop-up settings, profile changes and Off/On component lifetime checks. Run **build\runtime-test.exe** with a new scratch-directory argument for the Load/Accept/F9 controls.
 
-Run **build\online-test.exe** for online-finish backfill and Auction House payload
-validation; **build\tracking-test.exe** for map/route isolation, race completion,
+Run **build\online-test.exe** for FH3MP installation detection, normal journal
+status, online-finish backfill and Auction House payload validation;
+**build\tracking-test.exe** for map/route isolation, race completion,
 Co-op, skill/car guards and distinct car classes; and
 **build\pr-tracking-test.exe** for the native memory decoder, PR score boundaries,
 unique stunts, Hoonigan conditions, invalid pointers, native forwarding and Off.
