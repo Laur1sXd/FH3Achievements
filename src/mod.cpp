@@ -389,7 +389,7 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* platform) {
     api = platform;
     FH3ModInfo info{};
     info.size = sizeof info;
-    info.name = "FH3 Achievements";
+    info.name = "Achievements";
     info.version = Version;
     info.github_repo = "Laur1sXd/FH3Achievements";
     info.check_updates = 1;
