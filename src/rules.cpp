@@ -169,8 +169,13 @@ ProgressList evaluate(const Snapshot& save) {
     put(55, matching(std::array{660,661}, career.ids("SELECT ManufacturerId FROM Career_PurchasedParts")), 2);
     put(41, career.ids("SELECT CarOrdinal FROM PhotoCaptures").size(), 300);
     put(46, matching(HorizonEditionCars, garage));
-    stat(48, "Main/Level", 20);
-    stat(49, "Main/Level", 150);
+    // The supported game's PlayerXPLevels curve is 20,000 XP per level
+    // throughout both goals (20 and 150). Main/Level can lag the XP used by
+    // the actual HUD, including on existing edited/progressed careers.
+    const auto xp = bounded(save.stat("Main/XP"), 2980000);
+    const auto driverLevel = (std::max)(bounded(save.stat("Main/Level"), 150), xp ? xp / 20000 + 1 : 0);
+    put(48, driverLevel, 20);
+    put(49, driverLevel, 150);
     put(52, exhibitions, 63);
     stat(53, "CompareStats/CampaignSlotChampionshipsCompleted", 63);
     put(56, streak, 20);
