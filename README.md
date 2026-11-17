@@ -7,6 +7,8 @@ older FH2MP detector. The journal keeps its normal progress and unlocked status
 in offline and FH3MP play. Installed multiplayer files do not mean you have
 completed an online requirement.
 
+[Version 1.0.2 changelog](release-assets/FH3MP-1.0.2.md)
+
 ## Install
 
 1. Close Azimuth.
