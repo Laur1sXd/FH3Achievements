@@ -306,6 +306,16 @@ uint32_t eventWrite(const void* descriptor, const void* provider, uint64_t handl
 }
 }
 
+bool hasFh3mpInstallation(const fs::path& install) {
+    std::error_code error;
+    const auto file = [&](const fs::path& path) { return fs::is_regular_file(path, error); };
+    // Encore 0.1.1 installs a bcrypt shim beside Azimuth, not FH2MP.dll.
+    // A generic bcrypt.dll alone is not evidence of FH3MP.
+    return file(install / L"fh3-mods" / L"FH3MP.dll") ||
+           (file(install / L"bcrypt.dll") && file(install / L"fh3mp-shim.ini") &&
+            file(install / L"fh3mp-cloud.exe"));
+}
+
 bool installEventReader(const FH3ModApi* api, FH3Mod* mod, const uint8_t* base) {
     game = base;
     if (!api->hook_pointer || !api->enable_hooks) return false;
