@@ -24,7 +24,7 @@ if ($LASTEXITCODE) { throw 'SQLite build failed.' }
 $common = @('-std=c++20', '-fms-extensions', '-O2', '-static', '-DNOMINMAX', '-DWIN32_LEAN_AND_MEAN', '-D_WIN32_WINNT=0x0A00',
             '-Wall', '-Wextra', '-Werror', "-I$src", "-I$sdk", "-I$sqlite")
 if ($FixtureTest) { $common += '-DFH3_F9_COMPAT_TEST' }
-& $cpp @common -shared "$src\mod.cpp" "$src\runtime.cpp" "$src\journal.cpp" "$src\journal_xaml.cpp" "$src\import_notice.cpp" "$src\events.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -luser32 -o $dll
+& $cpp @common -shared "$src\mod.cpp" "$src\runtime.cpp" "$src\journal.cpp" "$src\journal_xaml.cpp" "$src\import_notice.cpp" "$src\events.cpp" "$src\pr_reader.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -luser32 -o $dll
 if ($LASTEXITCODE) { throw 'FH3 Achievements build failed.' }
 if ($SmokeTest) {
     & $cpp @common -municode "$PSScriptRoot\tests\smoke.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -o "$OutDir\smoke.exe"
@@ -35,4 +35,8 @@ if ($SmokeTest) {
     if ($LASTEXITCODE) { throw 'Native HUD test build failed.' }
     & $cpp @common "$PSScriptRoot\tests\online.cpp" "$src\rules.cpp" "$src\save.cpp" "$src\journal_xaml.cpp" $obj -lbcrypt -luser32 -o "$OutDir\online-test.exe"
     if ($LASTEXITCODE) { throw 'Online achievement test build failed.' }
+    & $cpp @common "$PSScriptRoot\tests\tracking.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -luser32 -o "$OutDir\tracking-test.exe"
+    if ($LASTEXITCODE) { throw 'DLC and event tracking test build failed.' }
+    & $cpp @common "$PSScriptRoot\tests\pr_tracking.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -luser32 -o "$OutDir\pr-tracking-test.exe"
+    if ($LASTEXITCODE) { throw 'Native PR achievement test build failed.' }
 }
