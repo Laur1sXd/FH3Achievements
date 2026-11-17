@@ -1,6 +1,6 @@
 # FH3 Achievements
 
-A local achievement mod for the Xbox One build of Forza Horizon 3 running in Azimuth. It lists all 135 Xbox One achievements and their original 3,000G. The mod reads 66 achievements from saves and implements nine additional live event rules. Each entry shows its requirement, points, and local progress where supported.
+A local achievement mod for the Xbox One build of Forza Horizon 3 running in Azimuth. It lists all 135 Xbox One achievements and their original 3,000G. All 135 entries now have local tracking paths when the native event and PR readers are active. Save data supplies full or partial backfill for 77 goals; live-only conditions are recorded as you play. Each entry shows its requirement, points, and progress.
 
 ## Install
 
@@ -26,33 +26,39 @@ the native notification component is busy. Notices wait for free roam with the
 game in focus and respect **Achievement pop-ups**. These are local mod unlocks;
 they do not create Xbox account achievements or Windows Xbox system toasts.
 
-The **Online** section now tracks these FH3MP-compatible achievements:
+The event reader covers Adventure/Free Roam finishes, Auction House claims and sales,
+Co-op events, community Blueprints, Airstrip car classes, and Infected in the
+Hoonigan Bel Air. Blizzard Mountain and Hot Wheels online goals require their
+own map and a matching route. Mountain Co-op races are counted separately from
+its Adventure/Free Roam races. Hot Wheels' online total accepts its supported
+Co-op, Adventure and Free Roam race events. Quits, incomplete results and Rivals
+are excluded; repeated notifications for one race are de-duplicated by RoundId.
 
-| Achievement | Tracking |
-| --- | --- |
-| Welcome to Horizon Online | Five completed Adventure/Free Roam events, using the saved online-finish counter. |
-| Online Adventurer | 25 completed Adventure/Free Roam events, using the same counter. |
-| Auction Fever | The native Auction House purchase/claim event. |
-| 5 Star Seller - A+++++ | Five native successful-sale/collection events. |
+**Tracking support does not add a missing FH3MP service.** If the installed
+FH3MP version cannot run Co-op, community Blueprints, DLC multiplayer, Infected,
+or launch the retired Forza Hub app, those goals wait for the genuine native
+event. Merely going online does not unlock them. The four final Forzathon goals
+use Forza Support's documented combined race/skill alternatives locally.
 
-Saved online finishes are recognized when the career is loaded. Auction tracking
-starts with this version; total Auction House transactions are not used to guess
-how many were sales. Live counters and unlocks persist per profile, using the
-existing settings, native notifications, two-or-more grouping and F9 controls.
-The mod is no longer marked offline-only in its platform registration.
+Blizzard Mountain, Hot Wheels and Hoonigan car challenges use the actual car,
+map, skill type/grade and completed result. The PR reader watches the game's
+native completion callback for Danger Signs, Drift Zones, Speed Traps and Speed
+Zones. It validates the source entity and its three-star threshold, then reads
+the player's current car, class and mass. Goals requiring different stunts,
+classes or Hoonigan cars retain distinct identifiers across game restarts and
+F9 reloads. Repeating one stunt cannot count as several different stunts.
 
-FH3MP's current [documented services](https://github.com/Charelene/FH3MP#readme)
-include Free Roam, Free Roam races, Adventure and the Auction House. Remaining
-online entries still show **Online only**: Co-op, community Blueprints, Airstrip
-class completion, expansion-specific online goals, Infected/Hoonigan, Forza Hub
-and the old community Forzathon goals have no verified tracking path in this
-version. They are not unlocked simply because the game is online.
+Past progress is restored only where the save proves the requirement. An old PR
+personal best does not prove which car performed it. Car-specific stunts, skills,
+blueprint authorship and other live-only evidence must be performed with the
+updated tracker running when that history is absent. Owning a DLC does not
+unlock its achievements automatically. A new career starts with zero progress.
 
-**Untracked** means this version has no supported trigger for an achievement.
-Live-only counters, such as Skill Song participation, convoy race finishes and
-auction sales, start when the mod begins receiving those events. Barn Find
-restoration is credited when the restored car is claimed. All Gamerscore remains
-local to the mod; this does not submit achievements to Xbox or FH3MP's servers.
+The updated local record is **FH3ACH4** and reads existing FH3ACH2/FH3ACH3 records.
+Back up the journal before downgrading: old DLLs cannot read the new evidence
+rows. All Gamerscore remains local; the mod does not submit Xbox account unlocks
+or change game saves. Details and verification limits are in
+[docs/tracking.md](docs/tracking.md).
 
 Check **fh3-mods\platform.log** for the native page hook, live event hook, and save sync status. To uninstall, close Azimuth and remove **FH3Achievements.dll**. You can keep the **FH3Achievements** data folder to preserve the journal.
 
@@ -68,10 +74,14 @@ Run the smoke test with your own game executable and a progressed Azimuth **play
 
 The harness checks the original tile hook target, page generation with fresh and progressed saves, the queued summary across reloads, previous ledger migration, a simulated live event, and save integrity. It writes the two generated XAML documents to the scratch directory for inspection. Run **build\native-notices-test.exe** for the native HUD ABI fixture: wording, trophy token, two-or-more grouping, queue order, first-run acknowledgement, busy/retry gates, pop-up settings, profile changes and Off/On component lifetime checks. Run **build\runtime-test.exe** with a new scratch-directory argument for the Load/Accept/F9 controls.
 
-Run **build\online-test.exe** to check saved online-finish thresholds, Auction
-House event payload validation, persistent-counter merging, journal status,
-locked unsupported entries and forwarding while Off. The smoke harness also
-records auction unlocks and reloads them without duplication or ledger rejection.
+Run **build\online-test.exe** for online-finish backfill and Auction House payload
+validation; **build\tracking-test.exe** for map/route isolation, race completion,
+Co-op, skill/car guards and distinct car classes; and
+**build\pr-tracking-test.exe** for the native memory decoder, PR score boundaries,
+unique stunts, Hoonigan conditions, invalid pointers, native forwarding and Off.
+The PR fixture also checks that all 135 goals have a target and start at zero
+when both native readers are available. The smoke harness verifies evidence
+persistence, legacy record migration, profile isolation and repeated F9 cycles.
 
 ## Credits
 
