@@ -147,6 +147,7 @@ struct WorkerState {
     Record record;
     fs::path currentCommit;
     std::wstring profile;
+    std::wstring pendingProfile;
     bool synced = false;
     std::string lastError;
     EventBatch pending{};
@@ -161,20 +162,22 @@ struct WorkerState {
     }
 
     void refresh(const uint8_t* game, bool eventsEnabled, bool prEnabled) {
-        mergeEventBatch(pending, takeEventBatch());
-        auto revision = latestRevision(saves);
+        const auto selected = activeProfile(game);
+        auto events = takeEventBatch();
+        if (!selected || *selected != pendingProfile) {
+            // A batch spanning a sign-in change cannot safely be assigned to
+            // either career. Do not carry it into a different player's ledger.
+            pending = {};
+            events = {};
+            pendingProfile = selected.value_or(L"");
+            // An unreadable new career must not leave the previous player's
+            // achievements on screen while its save is being retried.
+            if (!currentCommit.empty()) clearCareer(eventsEnabled, prEnabled);
+        }
+        mergeEventBatch(pending, events);
+        auto revision = selected ? latestRevision(saves, {}, *selected) : std::optional<Revision>{};
         if (!revision) {
-            if (!currentCommit.empty()) {
-                progress = initialProgress();
-                if (eventsEnabled) addEventProgress(progress, {},prEnabled);
-                record = {};
-                publishJournal(progress, record.unlocks);
-                currentCommit.clear();
-                profile.clear();
-                queueImportNotice({});
-                synced = false;
-                pending = {};
-            }
+            if (!currentCommit.empty()) clearCareer(eventsEnabled, prEnabled);
             return;
         }
         const bool saveChanged = revision->commit != currentCommit;
@@ -191,7 +194,7 @@ struct WorkerState {
                 // At startup Azimuth can still have an older complete revision.
                 // Once synchronized, keep the displayed progress and retry the new file.
                 if (synced) throw;
-                auto older = latestRevision(saves, revision->number);
+                auto older = latestRevision(saves, revision->number, revision->profile);
                 if (!older || older->profile != revision->profile) throw;
                 nextProgress = evaluate(readSave(game, *older));
                 revision = std::move(older);
@@ -257,7 +260,8 @@ struct WorkerState {
         if (popups && !popupUnlocks.empty()) queueAchievementNotices(popupUnlocks);
         if (!synced || changedProfile || !unlockedNow.empty()) {
             std::ostringstream line;
-            line << "Read save revision " << std::hex << revision->number << std::dec
+            line << "Read " << std::string(revision->profile.begin(), revision->profile.end())
+                 << " save revision " << std::hex << revision->number << std::dec
                  << "; level " << readLevel(nextProgress) << "; "
                  << unlockedNow.size() << " new local unlocks, +" << gained << "G";
             log(line.str());
@@ -273,6 +277,18 @@ struct WorkerState {
 
 private:
     bool preserveLedger = false;
+    void clearCareer(bool eventsEnabled, bool prEnabled) {
+        progress = initialProgress();
+        if (eventsEnabled) addEventProgress(progress, {}, prEnabled);
+        record = {};
+        publishJournal(progress, record.unlocks);
+        currentCommit.clear();
+        profile.clear();
+        queueImportNotice({});
+        synced = false;
+        pending = {};
+        preserveLedger = false;
+    }
     static int64_t readLevel(const ProgressList& next) { return next[49].current; }
 };
 
