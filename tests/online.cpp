@@ -111,8 +111,8 @@ int main() {
             require(card.find("ONLINE ONLY") == std::string::npos && card.find("UNTRACKED") == std::string::npos,
                     "supported online achievement is still hard-disabled in the journal");
         }
-        require(cardText(page, "Bring a Friend").find("ONLINE ONLY") != std::string::npos,
-                "unverified Co-op support was claimed");
+        require(cardText(page, "Bring a Friend").find("ONLINE ONLY") == std::string::npos,
+                "verified Co-op event tracker was not enabled");
         stopEventReader(&api, owner);
         emit(0x4462390, 7, fields.data());
         emit(0x44623c8, 7, fields.data());
