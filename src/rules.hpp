@@ -18,6 +18,12 @@ inline constexpr Achievement Catalog[] = {
 #include "catalog.inc"
 };
 
+// Online requirements stay part of the catalog. Enable only counters/events
+// whose meaning is known on FH3's supported build, not every online entry.
+constexpr bool onlineTrackingSupported(int id) {
+    return id == 35 || id == 36 || id == 37 || id == 38;
+}
+
 constexpr bool validCatalog() {
     int totals[5]{};
     int counts[5]{};
