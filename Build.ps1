@@ -39,4 +39,6 @@ if ($SmokeTest) {
     if ($LASTEXITCODE) { throw 'DLC and event tracking test build failed.' }
     & $cpp @common "$PSScriptRoot\tests\pr_tracking.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -luser32 -o "$OutDir\pr-tracking-test.exe"
     if ($LASTEXITCODE) { throw 'Native PR achievement test build failed.' }
+    & $cpp @common -municode "$PSScriptRoot\tests\save_profiles.cpp" "$src\rules.cpp" "$src\save.cpp" $obj -lbcrypt -o "$OutDir\save-profiles-test.exe"
+    if ($LASTEXITCODE) { throw 'Multiple-save profile test build failed.' }
 }
