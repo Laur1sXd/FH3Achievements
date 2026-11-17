@@ -21,7 +21,12 @@ inline constexpr Achievement Catalog[] = {
 // Online requirements stay part of the catalog. Enable only counters/events
 // whose meaning is known on FH3's supported build, not every online entry.
 constexpr bool onlineTrackingSupported(int id) {
-    return id == 35 || id == 36 || id == 37 || id == 38;
+    switch (id) {
+    case 13: case 18: case 35: case 36: case 37: case 38: case 39: case 40:
+    case 45: case 47: case 83: case 84: case 108: case 125:
+    case 132: case 133: case 134: case 135: return true;
+    default: return false;
+    }
 }
 
 constexpr bool validCatalog() {
