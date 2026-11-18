@@ -113,6 +113,7 @@ persistence, legacy record migration, profile isolation and repeated F9 cycles.
 
 - [Trinculo54's FH2 Achievements v1.0.2](https://github.com/Trinculo54/fh2-achievements/releases/tag/v1.0.2) provided the design for offline backfill, the achievement journal, and live event tracking.
 - [Levilente's FH3 Mod Platform](https://github.com/Levilente/FH3_ModPlatform) supplies the loader and API. Its SDK header is included under the MIT license.
+- [Charelene's FH3MP](https://github.com/Charelene/FH3MP) — provided FH3MP (through Encore launcher), which makes online multiplayer possible in Azimuth FH3.
 - Save format compatibility follows the Azimuth FH3 Save Editor, with format research by Doliman100 / ForzaTech and Nenkai / ForzaTools. The mod reads the necessary lookup tables from the running game.
 - The Xbox One achievement catalog was cross-checked against Xbox achievement listings and Forza Support's career totals. [TrueAchievements catalog](https://www.trueachievements.com/game/Forza-Horizon-3/achievements), [Forza Support career totals](https://support.forza.net/hc/en-us/articles/360005370173-FH3-Progress)
 - SQLite is public domain. The mod source is GPL-3.0. The package contains the mod only.
