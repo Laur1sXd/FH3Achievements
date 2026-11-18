@@ -8,7 +8,7 @@
   dates, counters and stunt evidence. Switching careers restores the matching
   journal; missing or unreadable saves cannot display another player's progress.
 - **Existing-save backfill fixes:** restores supported achievements from the
-  selected career. Level 20 and 150 goals also use earned XP when the cached
+  selected career. For example, level 20 and 150 goals also use earned XP when the cached
   level is outdated. Fresh careers start with zero unlocked achievements.
 - **Expanded tracking:** all 135 Xbox One achievement entries have local
   tracking paths when the native event and PR readers are active, covering the
@@ -25,9 +25,6 @@
   classes and Hoonigan cars are retained as distinct evidence across restarts.
 - **Progress preservation:** upgrades older local records to FH3ACH4 while
   retaining earned timestamps. Counters and distinct evidence survive F9 reloads.
-- **In-game name:** renamed to **Achievements**. Keeps the original Progress
-  tile, FH2-style journal and normal achievement status without an extra offline
-  connection notice.
 - **Existing controls and notifications retained:** FH3's native trophy HUD,
   two-or-more unlock grouping, first-import summary, pop-up setting and
   A-to-accept/F9 Load controls remain available.
